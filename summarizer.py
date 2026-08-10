@@ -1,0 +1,108 @@
+"""Turn a raw transcript into structured meeting notes using a local Ollama model.
+
+The transcript may be in any language, or several — lines are tagged with the
+speaker and the detected language code. ``config.NOTES_LANGUAGE`` decides
+whether the notes come back in English or in whatever was spoken.
+"""
+
+import requests
+
+import config
+import languages
+
+_LANGUAGE_RULE = """
+The transcript may be in any language, and may switch between languages. Lines \
+may be tagged with the speaker and a language code, like "[10:04] You (hi):". \
+Those tags are metadata — never copy them into the notes. \
+{directive}
+"""
+
+_PROMPT = """You are a meeting notes assistant. Below is a raw, timestamped \
+transcript of a meeting captured from a microphone. It may contain transcription \
+errors, filler words, and incomplete sentences. Produce clean, professional \
+meeting notes in Markdown with exactly these sections:
+
+## Summary
+A short paragraph (3-5 sentences) capturing what the meeting was about.
+
+## Key Discussion Points
+- Bullet points of the main topics discussed.
+
+## Decisions
+- Any decisions that were made. Write "None recorded." if there were none.
+
+## Action Items
+- [ ] Task — owner (if mentioned) — due date (if mentioned)
+Write "None recorded." if there were none.
+
+Only use information present in the transcript. Do not invent details.
+{language_rule}
+TRANSCRIPT:
+{transcript}
+"""
+
+
+_TITLE_PROMPT = """Give a short, descriptive title for the meeting described by \
+the transcript below. Use 3 to 6 words. Respond with ONLY the title text — no \
+quotes, no "Title:" label, no trailing punctuation, no explanation. \
+Write the title in English even if the transcript is in another language, and \
+use only plain ASCII letters — the title becomes a file name.
+
+TRANSCRIPT:
+{transcript}
+"""
+
+
+def _language_rule() -> str:
+    """The instruction that decides what language the notes come back in."""
+    setting = (getattr(config, "NOTES_LANGUAGE", "en") or "en").lower()
+    if setting == "same":
+        directive = ("Write the notes in the same language the meeting was "
+                     "conducted in. If several were used, choose the dominant "
+                     "one and keep the whole set of notes in it.")
+    else:
+        directive = (f"Write the notes in {languages.name_for(setting)}, "
+                     "translating as needed, no matter what language was "
+                     "spoken. Keep names, products and quoted phrases as they "
+                     "were said.")
+    return _LANGUAGE_RULE.format(directive=directive)
+
+
+def generate_title(transcript: str) -> str:
+    """Return a short human title for the meeting, or '' if Ollama is unreachable.
+
+    Used to name the saved files. Never raises — naming falls back to a
+    timestamp when the model can't be reached.
+    """
+    prompt = _TITLE_PROMPT.format(transcript=transcript[:4000])
+    try:
+        resp = requests.post(
+            f"{config.OLLAMA_URL}/api/generate",
+            json={"model": config.OLLAMA_MODEL, "prompt": prompt, "stream": False},
+            timeout=120,
+        )
+        resp.raise_for_status()
+    except requests.exceptions.RequestException:
+        return ""
+    return resp.json().get("response", "").strip()
+
+
+def summarize(transcript: str) -> str:
+    """Return Markdown notes, or raise RuntimeError if Ollama is unreachable."""
+    prompt = _PROMPT.format(transcript=transcript, language_rule=_language_rule())
+    try:
+        resp = requests.post(
+            f"{config.OLLAMA_URL}/api/generate",
+            json={"model": config.OLLAMA_MODEL, "prompt": prompt, "stream": False},
+            timeout=600,
+        )
+        resp.raise_for_status()
+    except requests.exceptions.ConnectionError as e:
+        raise RuntimeError(
+            "Could not reach Ollama. Is it running? Start it with `ollama serve` "
+            f"and pull the model with `ollama pull {config.OLLAMA_MODEL}`."
+        ) from e
+    except requests.exceptions.HTTPError as e:
+        raise RuntimeError(f"Ollama returned an error: {e} — {resp.text}") from e
+
+    return resp.json().get("response", "").strip()

@@ -1,0 +1,16 @@
+sounddevice>=0.4.6
+webrtcvad-wheels>=2.0.14
+# Captures the other people on a video call from your system audio
+# (WASAPI loopback on Windows, PulseAudio monitor on Linux). Needed for
+# CAPTURE_MODE = "both" / "system"; the mic works without it.
+soundcard>=0.4.3
+faster-whisper>=1.0.0
+numpy>=1.24
+requests>=2.31
+pystray>=0.19
+Pillow>=10.0
+# Only for "Benchmark this machine" in Settings; everything else works without it.
+psutil>=5.9
+
+# Calendar / email providers are not part of Core and need no packages here.
+# Nothing in this list can reach the network on your behalf.

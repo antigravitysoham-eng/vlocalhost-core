@@ -1,0 +1,26 @@
+# Recorded meetings — real transcripts and notes. Never commit these.
+notes/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# OAuth client secrets and cached tokens live in the per-user config folder,
+# not here — but block them anyway in case someone drops one in the project.
+*client_secret*.json
+google_token.json
+ms_client.json
+ms_token_cache.json
+settings.json
+recording.lock
+
+# Local tooling / editors
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
