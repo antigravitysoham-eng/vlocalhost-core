@@ -853,10 +853,21 @@ class App:
             style="Good.TLabel" if ok else "Bad.TLabel"))
 
     def _copy_mcp(self):
-        server = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "mcp_server.py")
+        """Point the assistant at whatever script launched this process.
+
+        Naming mcp_server.py directly would work for a plain Core install and
+        silently drop every installed extension for anyone running through a
+        launcher — the MCP server would come up without the providers the rest
+        of the app has.
+        """
+        launcher = os.path.abspath(sys.argv[0]) if sys.argv and sys.argv[0] else ""
+        if launcher.endswith(".py") and os.path.isfile(launcher):
+            args = [launcher, "--mcp"]
+        else:
+            args = [os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "mcp_server.py")]
         blob = json.dumps({"mcpServers": {"vlocalhost": {
-            "command": sys.executable, "args": [server]}}}, indent=2)
+            "command": sys.executable, "args": args}}}, indent=2)
         self.root.clipboard_clear()
         self.root.clipboard_append(blob)
         messagebox.showinfo(

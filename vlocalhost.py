@@ -18,11 +18,19 @@ own, and lets the summary be emailed to attendees or written back onto the
 event. ``--connect`` lists whichever providers this build has.
 """
 
+import os
 import sys
 import threading
 
 import config
 import settings
+
+
+def _script() -> str:
+    """How this process was invoked, for usage messages. A build reached
+    through a launcher shouldn't tell people to run a different file."""
+    name = os.path.basename(sys.argv[0]) if sys.argv and sys.argv[0] else ""
+    return name if name.endswith(".py") else "vlocalhost.py"
 
 
 def _print_line(line):
@@ -223,7 +231,7 @@ def main(argv):
                   f"  {UPGRADE_URL}", flush=True)
             return 1
         if name not in choices:
-            print(f"Usage: python vlocalhost.py --connect "
+            print(f"Usage: python {_script()} --connect "
                   f"{'|'.join(choices)}", flush=True)
             return 1
         run_connect(name)
