@@ -28,7 +28,7 @@ from typing import Callable, Dict, List, NamedTuple, Optional
 from .base import CalendarProvider, Event
 
 #: Where to point someone whose build has no providers installed.
-UPGRADE_URL = "https://vlocalhost.ai/pricing"
+UPGRADE_URL = "https://antigravitysoham-eng.github.io/vlocalhost-ai/pricing/"
 
 
 class _Registration(NamedTuple):

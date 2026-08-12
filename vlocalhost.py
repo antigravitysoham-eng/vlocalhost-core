@@ -12,6 +12,7 @@ different front end.
     python vlocalhost.py --connect <account>  # link a calendar/mail account
     python vlocalhost.py --install-shortcut   # desktop/menu icon, double-click to run
     python vlocalhost.py --remove-shortcut    # take it away again
+    python vlocalhost.py --diagnose           # write a report to send with a bug
 
 Recording, transcription, summaries and notes on disk need no account and no
 network. If a calendar provider is installed, connecting one additionally lets
@@ -218,7 +219,13 @@ def run_tray():
 
 # ---------------------------------------------------------------------------
 def main(argv):
+    import diagnostics
+
+    diagnostics.setup()
     settings.apply()
+
+    if "--diagnose" in argv:
+        return diagnostics.run_diagnose()
 
     if "--connect" in argv:
         from integrations import UPGRADE_URL, available_providers

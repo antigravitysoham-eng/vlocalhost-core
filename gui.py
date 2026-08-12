@@ -93,6 +93,15 @@ class App:
         root.configure(bg=INK)
         root.protocol("WM_DELETE_WINDOW", self._on_close)
 
+        # Tk swallows exceptions raised inside callbacks and prints them to a
+        # console the user does not have. Route them into the crash report.
+        try:
+            import diagnostics
+
+            root.report_callback_exception = diagnostics.tk_exception
+        except Exception:  # noqa: BLE001
+            pass
+
         self._style()
         self._header()
         self._tabs()
@@ -255,6 +264,8 @@ class App:
         ttk.Button(controls, text="Open notes folder",
                    command=lambda: open_folder(engine_mod.notes_dir())
                    ).pack(side="left", padx=8)
+        ttk.Button(controls, text="Report a problem",
+                   command=self._report_problem).pack(side="left")
 
         ttk.Label(parent, text="LIVE TRANSCRIPT", style="Mono.TLabel").pack(
             anchor="w", pady=(6, 4))
@@ -925,6 +936,24 @@ class App:
         self.status_right.configure(
             text=f"{config.WHISPER_MODEL} · {lang} · {config.OLLAMA_MODEL} "
                  f"· {provider}")
+
+    def _report_problem(self):
+        """Write a diagnostic report, show it, and offer to open support."""
+        import diagnostics
+
+        try:
+            path = diagnostics.save_report()
+        except Exception as e:  # noqa: BLE001
+            messagebox.showerror("Report", f"Could not write the report:\n{e}")
+            return
+        if messagebox.askyesno(
+                "Report a problem",
+                f"A diagnostic report has been saved:\n\n{path}\n\n"
+                "It lists your settings, versions and recent log lines — no "
+                "meeting audio, transcripts or notes. Read it before sending.\n\n"
+                "Open the support page now?"):
+            diagnostics.open_support()
+        open_folder(os.path.dirname(path))
 
     def _on_close(self):
         if self.engine.is_listening and not messagebox.askyesno(
