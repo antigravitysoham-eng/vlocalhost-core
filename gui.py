@@ -36,6 +36,27 @@ PAPER = "#EAEEF4"
 MUTED = "#7E8AA0"
 DANGER = "#E8624F"
 
+#: Callables run just before the window is destroyed, in registration order.
+#: Populated only by optional packages — the core registers none of its own.
+_exit_hooks = []
+
+
+def register_exit_hook(hook):
+    """Register *hook* to run just before the window closes.
+
+    ``hook`` is called with the root window and may open a dialog of its
+    own; the close waits for it. It runs *after* the engine has shut down
+    and the notes are on disk, so nothing a hook does can cost a recording,
+    and a hook that raises is reported and skipped — quitting must always
+    succeed.
+
+    This is an extension point. The core ships no hooks; a package that
+    wants a word with the user on the way out registers one from its
+    ``register()``.
+    """
+    _exit_hooks.append(hook)
+
+
 MONO = ("Cascadia Code", 9) if platform.system() == "Windows" else ("Menlo", 11)
 BODY = ("Segoe UI", 10) if platform.system() == "Windows" else ("Helvetica", 12)
 TITLE = ("Segoe UI", 20, "bold") if platform.system() == "Windows" \
@@ -916,6 +937,12 @@ class App:
             self.engine.shutdown()
         except Exception as e:  # noqa: BLE001 - never block the quit
             print(f"[gui] shutdown: {e}", flush=True)
+        for hook in _exit_hooks:
+            try:
+                hook(self.root)
+            except Exception as e:  # noqa: BLE001 - never block the quit
+                name = getattr(hook, "__name__", repr(hook))
+                print(f"[gui] exit hook {name}: {e}", flush=True)
         self.root.destroy()
 
 
