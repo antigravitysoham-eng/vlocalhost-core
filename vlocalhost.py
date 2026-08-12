@@ -10,6 +10,8 @@ different front end.
     python vlocalhost.py --mcp               # MCP server on stdio (for AI clients)
     python vlocalhost.py --devices            # list audio devices and capture support
     python vlocalhost.py --connect <account>  # link a calendar/mail account
+    python vlocalhost.py --install-shortcut   # desktop/menu icon, double-click to run
+    python vlocalhost.py --remove-shortcut    # take it away again
 
 Recording, transcription, summaries and notes on disk need no account and no
 network. If a calendar provider is installed, connecting one additionally lets
@@ -235,6 +237,14 @@ def main(argv):
                   f"{'|'.join(choices)}", flush=True)
             return 1
         run_connect(name)
+    elif "--install-shortcut" in argv:
+        import shortcut
+
+        return shortcut.run_install()
+    elif "--remove-shortcut" in argv:
+        import shortcut
+
+        return shortcut.run_remove()
     elif "--devices" in argv:
         run_devices()
     elif "--mcp" in argv:
