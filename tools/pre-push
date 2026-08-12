@@ -1,0 +1,47 @@
+#!/bin/sh
+# Refuse to push Core changes that read like Pro material.
+#
+# Core is public and AGPL. Pricing, tiers, licensing and the paid providers
+# belong in the private repository; an extension point here must be generic.
+# This is the 2am safety net for that rule, not a substitute for reading the
+# diff.
+#
+# Install:  python tools/install_hooks.py
+# Bypass:   git push --no-verify        (deliberate, and rare)
+
+remote_sha_zero="0000000000000000000000000000000000000000"
+
+# words that should never appear in a Core diff
+pattern='vlocalhost_pro|Vlocalhost Pro|pricing|per seat|per-seat|paid tier|premium tier|subscription|licence key|license key|upgrade to pro|stripe|invoice'
+
+fail=0
+
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+    [ "$local_sha" = "$remote_sha_zero" ] && continue    # branch deletion
+
+    if [ "$remote_sha" = "$remote_sha_zero" ]; then
+        range="$local_sha"                                # new branch
+    else
+        range="$remote_sha..$local_sha"
+    fi
+
+    # Exclude this hook: its own wordlist would otherwise trip it.
+    added=$(git diff "$range" --unified=0 --diff-filter=ACM \
+                -- . ':(exclude)tools/pre-push' 2>/dev/null \
+            | grep -E '^\+' | grep -vE '^\+\+\+')
+    [ -z "$added" ] && continue
+
+    hits=$(printf '%s\n' "$added" | grep -inE "$pattern")
+    if [ -n "$hits" ]; then
+        echo "pre-push: this Core push contains Pro-flavoured wording." >&2
+        echo "" >&2
+        printf '%s\n' "$hits" | head -20 >&2
+        echo "" >&2
+        echo "Core is PUBLIC. Pricing, tiers and paid features belong in the" >&2
+        echo "private repo; a hook here must be a generic extension point." >&2
+        echo "If this really is generic, push again with --no-verify." >&2
+        fail=1
+    fi
+done
+
+exit $fail

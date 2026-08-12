@@ -43,10 +43,17 @@ def _entry_script() -> str:
     Whatever was used to start this process, so a Pro install shortcuts its
     own launcher rather than Core's. Falls back to Core's entry point when
     that cannot be determined (a REPL, say).
+
+    Never this module: running ``python shortcut.py`` directly would
+    otherwise produce a shortcut pointing at the installer, so
+    double-clicking it would reinstall the shortcut instead of opening
+    the app.
     """
     argv0 = sys.argv[0] if sys.argv else ""
     if argv0 and argv0.endswith(".py") and os.path.isfile(argv0):
-        return os.path.abspath(argv0)
+        path = os.path.abspath(argv0)
+        if os.path.basename(path).lower() != os.path.basename(__file__).lower():
+            return path
     return os.path.join(_HERE, "vlocalhost.py")
 
 
