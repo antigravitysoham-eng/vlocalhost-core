@@ -66,11 +66,17 @@ cd vlocalhost-core
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+python tools/install_hooks.py     # once per clone
 python vlocalhost.py
 ```
 
 You will also need [Ollama](https://ollama.com/download) running for the
 summarization step, and PortAudio on macOS/Linux — see the README.
+
+`install_hooks.py` adds a `pre-push` check that refuses a push whose added
+lines read like paid-tier material — this repository is public, and that rule
+is easy to forget at the end of a long session. If it stops a push you know to
+be generic, `git push --no-verify`.
 
 ## Before you open a pull request
 
