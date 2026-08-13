@@ -1,6 +1,11 @@
 # Recorded meetings — real transcripts and notes. Never commit these.
 notes/
 
+# Release bundles and the interpreter downloads they are built from.
+# Hundreds of megabytes; they belong on a GitHub release, never in git.
+build/
+dist/
+
 # Python
 __pycache__/
 *.py[cod]

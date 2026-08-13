@@ -27,7 +27,7 @@ import sys
 import traceback
 from datetime import datetime
 
-APP_VERSION = "1.0.5"
+from version import __version__ as APP_VERSION
 
 SUPPORT_URL = "https://antigravitysoham-eng.github.io/vlocalhost-ai/support/"
 

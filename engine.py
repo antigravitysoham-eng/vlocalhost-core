@@ -28,8 +28,7 @@ _LOCK_FILE = "recording.lock"
 
 def notes_dir() -> str:
     """Absolute path of the folder transcripts and notes are written to."""
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        config.OUTPUT_DIR)
+    return store.notes_dir()
 
 
 # --- One microphone, one recorder ----------------------------------------

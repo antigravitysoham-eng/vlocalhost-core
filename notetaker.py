@@ -12,6 +12,7 @@ from datetime import datetime
 
 import config
 from audio_listener import build_listener
+from integrations import store
 from transcriber import build_transcriber
 from summarizer import summarize, generate_title
 
@@ -132,9 +133,7 @@ class NoteTaker:
         if not transcript.strip():
             return None, "Nothing was transcribed — no notes to save."
 
-        out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                               config.OUTPUT_DIR)
-        os.makedirs(out_dir, exist_ok=True)
+        out_dir = store.notes_dir()
         date = datetime.now().strftime("%Y-%m-%d")
         stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 

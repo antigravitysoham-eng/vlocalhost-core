@@ -1,0 +1,25 @@
+# Line endings.
+#
+# Text files are normalised to LF in the repository and checked out however the
+# platform prefers — except the ones below, where CRLF is a bug rather than a
+# preference.
+* text=auto
+
+# Shell scripts MUST be LF, on every platform. A CRLF shebang fails with
+# "bad interpreter: /bin/bash^M", and tools/build_bundle.py copies install.sh
+# out of the working tree into the Linux bundle — so a bundle built on a
+# Windows checkout would ship a script that cannot run.
+*.sh        text eol=lf
+*.command   text eol=lf
+
+# Inno Setup and Windows batch want CRLF.
+*.iss       text eol=crlf
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+
+# Binary — never touch these.
+*.png       binary
+*.ico       binary
+*.icns      binary
+*.zip       binary
+*.tar.gz    binary

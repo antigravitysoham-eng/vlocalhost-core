@@ -13,6 +13,9 @@ different front end.
     python vlocalhost.py --install-shortcut   # desktop/menu icon, double-click to run
     python vlocalhost.py --remove-shortcut    # take it away again
     python vlocalhost.py --diagnose           # write a report to send with a bug
+    python vlocalhost.py --get                # list every setting you can change
+    python vlocalhost.py --set OLLAMA_MODEL=mistral   # change one (or several)
+    python vlocalhost.py --paths              # where notes, settings and models live
 
 Recording, transcription, summaries and notes on disk need no account and no
 network. If a calendar provider is installed, connecting one additionally lets
@@ -218,14 +221,104 @@ def run_tray():
 
 
 # ---------------------------------------------------------------------------
+def run_set(pairs):
+    """``--set KEY=VALUE`` — write settings from a script or an installer."""
+    changes = {}
+    for pair in pairs:
+        if "=" not in pair:
+            print(f"Expected KEY=VALUE, got {pair!r}", flush=True)
+            return 1
+        key, raw = pair.split("=", 1)
+        key = key.strip().upper()
+        if key not in settings.EDITABLE:
+            print(f"{key} is not a settable option. Try --get to list them.",
+                  flush=True)
+            return 1
+        try:
+            changes[key] = settings.coerce(key, raw)
+        except ValueError as e:
+            print(str(e), flush=True)
+            return 1
+
+    settings.save(**changes)
+    for key, value in sorted(changes.items()):
+        print(f"{key} = {value!r}", flush=True)
+    print(f"\nSaved to {settings.path()}", flush=True)
+    return 0
+
+
+def run_get(key):
+    """``--get [KEY]`` — read one setting, or list every settable option."""
+    current = settings.current()
+    if not key:
+        width = max(len(k) for k in current)
+        for name, value in sorted(current.items()):
+            print(f"{name.ljust(width)}  {value!r}", flush=True)
+        return 0
+    key = key.strip().upper()
+    if key not in current:
+        print(f"{key} is not a settable option. Run --get with no name to "
+              f"list them.", flush=True)
+        return 1
+    print(repr(current[key]), flush=True)
+    return 0
+
+
+def run_paths():
+    """``--paths`` — where everything lives, for support conversations."""
+    from integrations import store
+
+    print(f"settings   {settings.path()}", flush=True)
+    print(f"config     {store.config_dir()}", flush=True)
+    print(f"data       {store.data_dir()}", flush=True)
+    print(f"notes      {store.notes_dir()}", flush=True)
+    print(f"models     {store.models_dir()}", flush=True)
+    print(f"app        {os.path.dirname(os.path.abspath(__file__))}", flush=True)
+    return 0
+
+
+# ---------------------------------------------------------------------------
 def main(argv):
     import diagnostics
+    import migrate
 
     diagnostics.setup()
     settings.apply()
+    # Before anything opens a window or writes a note: rescue anything an
+    # older version left inside an application folder.
+    migrate.run(quiet="--mcp" in argv)
 
     if "--diagnose" in argv:
         return diagnostics.run_diagnose()
+
+    if "--set" in argv:
+        return run_set([a for a in argv[argv.index("--set") + 1:]
+                        if not a.startswith("--")])
+
+    if "--get" in argv:
+        i = argv.index("--get")
+        nxt = argv[i + 1] if i + 1 < len(argv) else ""
+        return run_get("" if nxt.startswith("--") else nxt)
+
+    if "--paths" in argv:
+        return run_paths()
+
+    if "--setup" in argv:
+        import setup_wizard
+
+        setup_wizard.run()
+        return 0
+
+    # First run, and a window is what they're getting: ask the two questions
+    # before the app opens. Skipped for the tray, the terminal and MCP, which
+    # are either headless or driven by something that can't answer.
+    if not any(f in argv for f in ("--tray", "--no-tray", "--mcp",
+                                   "--devices", "--connect")):
+        import setup_wizard
+
+        if setup_wizard.needed():
+            setup_wizard.run()
+            settings.apply()
 
     if "--connect" in argv:
         from integrations import UPGRADE_URL, available_providers

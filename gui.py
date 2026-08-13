@@ -715,13 +715,17 @@ class App:
                   style="Muted.TLabel").grid(row=0, column=2, sticky="w")
 
         ttk.Label(models, text="Speech-to-text").grid(row=1, column=0, sticky="w")
+        speech = ttk.Frame(models)
+        speech.grid(row=1, column=1, sticky="w", padx=10, pady=4)
         self.whisper_var = tk.StringVar(value=current.get("WHISPER_MODEL"))
-        whisper = ttk.Combobox(models, textvariable=self.whisper_var, width=34,
+        whisper = ttk.Combobox(speech, textvariable=self.whisper_var, width=26,
                                values=["tiny", "base", "small", "medium",
                                        "large-v3", "tiny.en", "base.en",
                                        "small.en", "medium.en"])
-        whisper.grid(row=1, column=1, sticky="w", padx=10, pady=4)
+        whisper.pack(side="left")
         whisper.bind("<<ComboboxSelected>>", lambda _e: self._language_changed())
+        ttk.Button(speech, text="Folder…", width=8,
+                   command=self._browse_model).pack(side="left", padx=(6, 0))
         ttk.Label(models, text="“.en” = English only · or a HF id / local folder",
                   style="Muted.TLabel").grid(row=1, column=2, sticky="w")
 
@@ -745,25 +749,50 @@ class App:
                         command=self._language_changed).grid(
             row=4, column=0, columnspan=3, sticky="w", pady=(0, 6))
 
-        ttk.Label(models, text="Summarization").grid(row=5, column=0, sticky="w")
-        self.ollama_var = tk.StringVar(value=current.get("OLLAMA_MODEL"))
-        ttk.Entry(models, textvariable=self.ollama_var, width=36).grid(
+        ttk.Label(models, text="Ollama server").grid(row=5, column=0, sticky="w")
+        self.ollama_url_var = tk.StringVar(value=current.get("OLLAMA_URL"))
+        ttk.Entry(models, textvariable=self.ollama_url_var, width=36).grid(
             row=5, column=1, sticky="w", padx=10, pady=4)
+        ttk.Label(models, text="another machine on your LAN works too",
+                  style="Muted.TLabel").grid(row=5, column=2, sticky="w")
+
+        ttk.Label(models, text="Summarization").grid(row=6, column=0, sticky="w")
+        summ = ttk.Frame(models)
+        summ.grid(row=6, column=1, sticky="w", padx=10, pady=4)
+        self.ollama_var = tk.StringVar(value=current.get("OLLAMA_MODEL"))
+        # A combobox, not an entry: typing a model name that isn't installed is
+        # the single most common way to end up with no summaries and no clue why.
+        self.ollama_box = ttk.Combobox(summ, textvariable=self.ollama_var,
+                                       width=26)
+        self.ollama_box.pack(side="left")
+        ttk.Button(summ, text="List…", width=8,
+                   command=self._list_ollama_models).pack(side="left", padx=(6, 0))
         self.ollama_label = ttk.Label(models, text="checking Ollama…",
                                       style="Muted.TLabel")
-        self.ollama_label.grid(row=5, column=2, sticky="w")
+        self.ollama_label.grid(row=6, column=2, sticky="w")
+
+        ttk.Label(models, text="Custom engine").grid(row=7, column=0, sticky="w")
+        self.custom_stt_var = tk.StringVar(
+            value=current.get("CUSTOM_TRANSCRIBER") or "")
+        ttk.Entry(models, textvariable=self.custom_stt_var, width=36).grid(
+            row=7, column=1, sticky="w", padx=10, pady=4)
+        ttk.Label(models, text="advanced — \"module:ClassName\"; runs code you "
+                               "name. Blank = faster-whisper.",
+                  style="Muted.TLabel").grid(row=7, column=2, sticky="w")
 
         buttons = ttk.Frame(models)
-        buttons.grid(row=6, column=0, columnspan=3, sticky="w", pady=(10, 0))
+        buttons.grid(row=8, column=0, columnspan=3, sticky="w", pady=(10, 0))
         ttk.Button(buttons, text="Save models", command=self._save_models).pack(
             side="left")
         ttk.Button(buttons, text="Re-check Ollama",
                    command=lambda: threading.Thread(target=self._check_ollama,
                                                     daemon=True).start()
                    ).pack(side="left", padx=8)
+        ttk.Button(buttons, text="Run setup again",
+                   command=self._rerun_setup).pack(side="left")
         ttk.Label(models, text="A model or language change applies to the next "
                                "recording.", style="Muted.TLabel").grid(
-            row=7, column=0, columnspan=3, sticky="w", pady=(8, 0))
+            row=9, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
         mcp = ttk.LabelFrame(parent, text="Connect an AI assistant (MCP)",
                              style="Card.TLabelframe", padding=14)
@@ -871,9 +900,67 @@ class App:
             style="Bad.TLabel" if warning else "Good.TLabel")
         self._refresh_status_right()
 
+    def _browse_model(self):
+        """Point the speech engine at a converted model folder on disk."""
+        chosen = filedialog.askdirectory(
+            parent=self.root,
+            title="Select a converted CTranslate2 / Whisper model folder")
+        if chosen:
+            self.whisper_var.set(chosen)
+            self._language_changed()
+
+    def _list_ollama_models(self):
+        """Fill the dropdown with what this Ollama actually has installed."""
+        # Read the variable here, on the Tk thread. Touching a tkinter variable
+        # from a worker raises "main thread is not in main loop".
+        url = self.ollama_url_var.get().strip()
+
+        def worker():
+            import setup_wizard
+
+            reachable, names = setup_wizard.ollama_models(url)
+
+            def apply():
+                if not reachable:
+                    self.ollama_label.configure(
+                        text="✗ No Ollama at that address.", style="Bad.TLabel")
+                    return
+                self.ollama_box.configure(values=names)
+                if names:
+                    self.ollama_label.configure(
+                        text=f"✓ {len(names)} model(s) installed",
+                        style="Good.TLabel")
+                else:
+                    self.ollama_label.configure(
+                        text="Ollama is running but has no models yet.",
+                        style="Bad.TLabel")
+            self._ui_q.put(apply)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _rerun_setup(self):
+        """Re-open the first-run wizard, then reflect whatever it saved."""
+        import setup_wizard
+
+        setup_wizard.run(self.root)
+        settings.apply()
+        current = settings.current()
+        self.whisper_var.set(current.get("WHISPER_MODEL") or "")
+        self.ollama_var.set(current.get("OLLAMA_MODEL") or "")
+        self.ollama_url_var.set(current.get("OLLAMA_URL") or "")
+        self._refresh_profile()
+        self._show_language_warning()
+        self._refresh_status_right()
+        self.status_left.configure(text="Setup finished.")
+
     def _save_models(self):
         self._language_changed()   # persists the model too, and re-checks it
-        settings.save(OLLAMA_MODEL=self.ollama_var.get().strip())
+        settings.save(
+            OLLAMA_MODEL=self.ollama_var.get().strip(),
+            OLLAMA_URL=self.ollama_url_var.get().strip() or config.OLLAMA_URL,
+            # Blank means "use faster-whisper", which is None, not "".
+            CUSTOM_TRANSCRIBER=self.custom_stt_var.get().strip() or None,
+        )
         self.status_left.configure(text="Model settings saved.")
         self._refresh_status_right()
         threading.Thread(target=self._check_ollama, daemon=True).start()

@@ -113,7 +113,12 @@ OLLAMA_URL = "http://localhost:11434"
 OLLAMA_MODEL = "llama3.2"    # pull first:  ollama pull llama3.2
 
 # --- Output --------------------------------------------------------------
-OUTPUT_DIR = "notes"         # transcripts + summaries saved here
+# Where transcripts and summaries are written. A plain name lands inside your
+# per-user data folder — NOT next to this file, so updating or reinstalling the
+# app can never touch your notes. Run `python vlocalhost.py --paths` to see the
+# real location. Set an absolute path to keep notes somewhere else entirely,
+# e.g. a synced folder:  OUTPUT_DIR = r"D:\Dropbox\Meetings"
+OUTPUT_DIR = "notes"
 
 # --- Calendar / email integration (optional) -----------------------------
 # Core ships no providers, so the settings below do nothing on their own —

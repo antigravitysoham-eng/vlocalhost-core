@@ -18,9 +18,16 @@ from integrations import store
 
 _FILE = "settings.json"
 
-# Only these may be changed from the UI. Each name is a ``config`` attribute.
+# Only these may be changed from the UI or the command line. Each name is a
+# ``config`` attribute.
+#
+# Anything a user is *told* to configure has to be in here. A setting that only
+# exists as a line in ``config.py`` is not really configurable: the installer
+# unpacks a fresh copy of that file on every update, so hand edits are silently
+# reverted the first time somebody upgrades.
 EDITABLE = (
     "CAPTURE_MODE",
+    "INPUT_DEVICE",
     "CALENDAR_PROVIDER",
     "AUTO_START_FROM_CALENDAR",
     "EMAIL_SUMMARY_TO_ATTENDEES",
@@ -30,11 +37,20 @@ EDITABLE = (
     "WHISPER_BEAM_SIZE",
     "WHISPER_COMPUTE",
     "WHISPER_CPU_THREADS",
+    "WHISPER_DEVICE",
     "RELEASE_MODEL_WHEN_IDLE",
     "WHISPER_LANGUAGE",
     "WHISPER_TASK",
     "NOTES_LANGUAGE",
+    "OLLAMA_URL",
     "OLLAMA_MODEL",
+    "OUTPUT_DIR",
+    # "module:ClassName" of a speech engine to use instead of faster-whisper.
+    # This imports and runs code the user names, so the Settings tab keeps it
+    # behind an Advanced disclosure and says so plainly. It is no more
+    # privileged than config.py was — same user, same machine — but it is
+    # worth being explicit about.
+    "CUSTOM_TRANSCRIBER",
 )
 
 
@@ -89,3 +105,43 @@ def save(**changes) -> dict:
         json.dump(data, f, indent=2, sort_keys=True)
     os.replace(tmp, target)
     return data
+
+
+_TRUE = ("1", "true", "yes", "on")
+_FALSE = ("0", "false", "no", "off")
+_EMPTY = ("", "none", "null", "default")
+
+
+def coerce(key: str, raw: str):
+    """Turn a command-line string into the type this setting expects.
+
+    The shape is taken from whatever ``config`` currently holds, so the rule
+    stays right if a default changes. ``none`` clears a setting back to the
+    default; a bare number becomes an int where the current value is one (or
+    is unset, as with a microphone index).
+    """
+    current = getattr(config, key, None)
+    text = raw.strip()
+
+    if isinstance(current, bool):
+        low = text.lower()
+        if low in _TRUE:
+            return True
+        if low in _FALSE:
+            return False
+        raise ValueError(f"{key} expects true or false, not {raw!r}")
+
+    if isinstance(current, int) and not isinstance(current, bool):
+        try:
+            return int(text)
+        except ValueError:
+            raise ValueError(f"{key} expects a whole number, not {raw!r}") from None
+
+    if text.lower() in _EMPTY:
+        return None
+
+    # INPUT_DEVICE defaults to None but takes an index or a name substring.
+    if current is None and text.isdigit():
+        return int(text)
+
+    return text
