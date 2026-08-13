@@ -711,7 +711,7 @@ class App:
                             values=[label for _, label in languages.choices()])
         lang.grid(row=0, column=1, sticky="w", padx=10, pady=4)
         lang.bind("<<ComboboxSelected>>", lambda _e: self._language_changed())
-        ttk.Label(models, text="100 languages; pin one if you know it",
+        ttk.Label(models, text="English by default · 100 languages to pick from",
                   style="Muted.TLabel").grid(row=0, column=2, sticky="w")
 
         ttk.Label(models, text="Speech-to-text").grid(row=1, column=0, sticky="w")
@@ -874,12 +874,22 @@ class App:
 
         threading.Thread(target=worker, daemon=True).start()
 
+    @staticmethod
+    def _language_ok_text(code):
+        """What to say when the model/language pairing is sound. A pinned
+        language gets no per-line tag, so promising one would be a lie."""
+        if languages.normalize(code) is None:
+            return ("✓ Detected language is shown on each line, so a mistake "
+                    "is visible.")
+        return (f"✓ Everything is transcribed as {languages.name_for(code)}. "
+                "Pick Auto-detect for a meeting that switches languages.")
+
     def _show_language_warning(self):
         """Check the saved model/language pairing without re-saving it."""
         warning = languages.check(config.WHISPER_MODEL, config.WHISPER_LANGUAGE)
         self.lang_warning.configure(
-            text=("⚠ " + warning) if warning else
-            "✓ Detected language is shown on each line, so a mistake is visible.",
+            text=("⚠ " + warning) if warning
+            else self._language_ok_text(config.WHISPER_LANGUAGE),
             style="Bad.TLabel" if warning else "Good.TLabel")
 
     def _language_changed(self):
@@ -895,8 +905,7 @@ class App:
         )
         warning = languages.check(model, code)
         self.lang_warning.configure(
-            text=("⚠ " + warning) if warning else
-            "✓ Detected language is shown on each line, so a mistake is visible.",
+            text=("⚠ " + warning) if warning else self._language_ok_text(code),
             style="Bad.TLabel" if warning else "Good.TLabel")
         self._refresh_status_right()
 

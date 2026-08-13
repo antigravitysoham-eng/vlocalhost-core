@@ -59,10 +59,12 @@ class FasterWhisperTranscriber:
     """The built-in engine. Loads a faster-whisper model (by name or local path)
     once and reuses it for every utterance.
 
-    Multilingual by default: with ``WHISPER_LANGUAGE = None`` the language is
-    detected **per utterance**, so a bilingual meeting transcribes correctly as
-    it switches between speakers. The detected code is left on
-    :attr:`last_language` for the caller to label the line with.
+    The model is multilingual; ``WHISPER_LANGUAGE`` decides what it listens
+    for. It ships pinned to ``"en"``, and any of the 100 supported codes can be
+    chosen instead. Set it to ``None`` and the language is detected **per
+    utterance**, so a bilingual meeting transcribes correctly as it switches
+    between speakers; the detected code is left on :attr:`last_language` for
+    the caller to label the line with.
     """
 
     def __init__(self):

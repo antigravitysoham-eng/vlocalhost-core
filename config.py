@@ -81,11 +81,13 @@ WHISPER_CPU_THREADS = 0
 # Turn off if you start and stop recordings constantly.
 RELEASE_MODEL_WHEN_IDLE = True
 
-# Spoken language. None = detect it per utterance, so a meeting that switches
-# between languages transcribes correctly as it goes. Pin a code (e.g. "hi")
-# when you know the language — detection is unreliable on very short utterances
-# and pinning is both faster and more accurate. See languages.py for the list.
-WHISPER_LANGUAGE = None
+# Spoken language. "en" out of the box: most meetings are in one known
+# language, and pinning it is both faster and more accurate than detection,
+# which is unreliable on the short utterances a meeting is made of. Pin another
+# code (e.g. "hi") from Settings, or set None to detect the language per
+# utterance — right for a meeting that switches between languages mid-sentence.
+# See languages.py for the list.
+WHISPER_LANGUAGE = "en"
 
 # "transcribe" keeps the original language. "translate" renders any language
 # into English (Whisper does this natively, still offline).

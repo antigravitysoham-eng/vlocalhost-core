@@ -18,9 +18,9 @@ system audio ─┘        (silence ignored)         (local)            │
 
 - **Both ends** — your microphone *and* the meeting audio from your speakers,
   labelled `You` and `Participants`.
-- **100 languages** — including Hindi, Bengali, Marathi, Gujarati, Tamil,
-  Telugu, Kannada, Malayalam, Punjabi, Urdu, French, Spanish, Japanese and
-  Chinese, detected per utterance.
+- **100 languages** — English out of the box; switch to Hindi, Bengali,
+  Marathi, Gujarati, Tamil, Telugu, Kannada, Malayalam, Punjabi, Urdu, French,
+  Spanish, Japanese, Chinese and more, or auto-detect per utterance.
 - **Light** — ~350 MB while recording, ~90 MB idle, 4.5× real time on a
   6-core CPU. [Measured.](docs/performance.md)
 - **Silence is ignored** — it only transcribes real speech.
@@ -140,10 +140,13 @@ the approach, the trade-offs, and the effort are laid out in
 
 ## 5. Languages
 
-Vlocalhost transcribes **100 languages** and detects the language **per
-utterance**, so a meeting that switches between them transcribes correctly as it
-goes. Pick one under **Settings → Spoken language**, or leave it on
-**Auto-detect**. Each line is tagged with what was detected:
+Vlocalhost transcribes **100 languages**. It listens for **English** unless you
+say otherwise: pinning the language is faster and more accurate than detecting
+it, and meeting utterances are short enough that detection does get things
+wrong. Pick another under **Settings → Spoken language**, or choose
+**Auto-detect** — that detects the language **per utterance**, so a meeting that
+switches between them transcribes correctly as it goes, and each line is tagged
+with what was detected:
 
 ```
 [10:04:12] You (en): Can you send the vendor analysis?
@@ -240,7 +243,7 @@ The advanced knobs are in `config.py`:
 | `INPUT_DEVICE` | Microphone index or name substring; `None` = default. |
 | `WHISPER_MODEL` | Accuracy vs speed: `tiny` → `base` → `small` → `medium`. A `.en` suffix means English-only. **Bring your own model:** a name, a Hugging Face repo id, or a **local folder** — any size, any language. |
 | `CUSTOM_TRANSCRIBER` | Attach a custom STT engine (`"module:ClassName"` with `.transcribe(pcm_bytes)`) and bypass faster-whisper entirely. |
-| `WHISPER_LANGUAGE` | `None` = detect per utterance, or an ISO code like `"hi"`. |
+| `WHISPER_LANGUAGE` | `"en"` by default. Another ISO code like `"hi"`, or `None` to detect per utterance. |
 | `WHISPER_TASK` | `"transcribe"` keeps the spoken language; `"translate"` outputs English. |
 | `WHISPER_BEAM_SIZE` | `1` = greedy (fast). `5` = slower, marginally better. |
 | `WHISPER_CPU_THREADS` | `0` = all cores. Set `2` on a small machine. |
