@@ -4,7 +4,7 @@
 
 **Please do not open a public issue for a security problem.**
 
-Email **soham.mitra@zeron.one** with:
+Email **vlocalhostai@gmail.com** with:
 
 - What the issue is and where in the code it lives
 - How to reproduce it

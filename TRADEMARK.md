@@ -39,4 +39,4 @@ from thinking they are getting something they are not.
 ## Requesting permission
 
 For any use beyond the above — bundling, reselling, OEM arrangements, or
-marketing that references the brand — email **soham.mitra@zeron.one**.
+marketing that references the brand — email **vlocalhostai@gmail.com**.
