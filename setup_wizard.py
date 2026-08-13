@@ -28,12 +28,14 @@ summary does.
 """
 
 import json
+import os
 import queue
 import threading
 import tkinter as tk
 from tkinter import filedialog, ttk
 
 import config
+import languages
 import performance
 import settings
 
@@ -56,6 +58,13 @@ _HEAD = ("Segoe UI", 17, "bold") if _platform.system() == "Windows" \
 
 #: What we offer to fetch when there is no usable model installed.
 DEFAULT_LLM = "llama3.2"
+
+#: What the language picker opens on. Deliberately a constant rather than
+#: whatever ``config`` currently holds: setup is the place where somebody is
+#: told what the app assumes, and the answer should not change depending on
+#: what a previous run left behind. Anyone who wants another language picks it
+#: here, or in Settings afterwards.
+DEFAULT_LANGUAGE = "en"
 
 #: Long enough for a busy machine, short enough that nobody thinks we hung.
 PROBE_TIMEOUT = 2.5
@@ -86,6 +95,36 @@ def ollama_models(url: str = "") -> tuple:
         if name:
             names.append(name)
     return True, sorted(names)
+
+
+def default_notes_dir() -> str:
+    """Where notes go when nobody has chosen anything: the per-user data
+    folder, which no install or upgrade ever touches."""
+    from integrations import store
+
+    return os.path.join(store.data_dir(), "notes")
+
+
+def folder_problem(path: str) -> str:
+    """Why ``path`` can't hold notes, or "" if it can.
+
+    Checked by writing, not by inspecting permissions: a network share, a
+    read-only mount and a folder owned by another user all look fine until
+    something actually tries.
+    """
+    probe = os.path.join(path, ".vlocalhost-write-test")
+    try:
+        os.makedirs(path, exist_ok=True)
+        with open(probe, "w", encoding="utf-8") as handle:
+            handle.write("")
+    except OSError as e:
+        return f"Notes can't be saved there: {e.strerror or e}"
+    finally:
+        try:
+            os.remove(probe)
+        except OSError:
+            pass
+    return ""
 
 
 def _base_name(model: str) -> str:
@@ -158,8 +197,8 @@ class Wizard:
         self.back_btn.pack(side="left")
         self.next_btn.pack(side="right")
 
-        self.steps = [self._step_welcome, self._step_speech, self._step_summaries,
-                      self._step_done]
+        self.steps = [self._step_welcome, self._step_language, self._step_speech,
+                      self._step_summaries, self._step_done]
         self.index = 0
         self._render()
 
@@ -187,8 +226,17 @@ class Wizard:
         last = self.index == len(self.steps) - 1
         self.next_btn.configure(text="Finish" if last else "Next")
 
+    def _remember(self):
+        """Hold on to this page's answers: leaving it destroys its widgets, and
+        a rebuilt page must come back with what the user already chose."""
+        for name in ("notes_dir", "language", "profile", "custom_model"):
+            var = getattr(self, name, None)
+            if var is not None:
+                self.choices[name] = var.get()
+
     def _back(self):
         if self.index:
+            self._remember()
             self.index -= 1
             self._render()
 
@@ -196,6 +244,7 @@ class Wizard:
         if self.index == len(self.steps) - 1:
             self._close()
             return
+        self._remember()
         self.index += 1
         self._render()
 
@@ -205,18 +254,95 @@ class Wizard:
 
         self._heading(
             "Everything stays on this machine",
-            "Two quick questions and you're recording. Both can be changed "
-            "later in Settings.")
+            "A few quick questions and you're recording. Every answer can be "
+            "changed later in Settings.")
+
+        self.notes_dir = tk.StringVar(
+            value=self.choices.get("notes_dir") or store.notes_dir())
         card = tk.Frame(self.body, bg=PANEL, highlightbackground=EDGE,
                         highlightthickness=1, padx=16, pady=14)
         card.pack(fill="x", pady=(18, 0))
         tk.Label(card, text="Your notes will be saved to", font=_BODY,
                  bg=PANEL, fg=MUTED).pack(anchor="w")
-        tk.Label(card, text=store.notes_dir(), font=_MONO, bg=PANEL, fg=AMBER,
-                 wraplength=500, justify="left").pack(anchor="w", pady=(4, 0))
-        tk.Label(card, text="Updating or reinstalling the app never touches "
-                            "this folder.", font=_BODY, bg=PANEL,
-                 fg=MUTED).pack(anchor="w", pady=(10, 0))
+        tk.Label(card, textvariable=self.notes_dir, font=_MONO, bg=PANEL,
+                 fg=AMBER, wraplength=500,
+                 justify="left").pack(anchor="w", pady=(4, 0))
+
+        row = tk.Frame(card, bg=PANEL)
+        row.pack(anchor="w", pady=(12, 0))
+        ttk.Button(row, text="Choose folder…",
+                   command=self._browse_notes).pack(side="left")
+        ttk.Button(row, text="Use the default",
+                   command=self._default_notes).pack(side="left", padx=(8, 0))
+
+        self.notes_note = tk.Label(
+            card, text="Updating or reinstalling the app never touches this "
+                       "folder. Point it at a synced folder and your notes "
+                       "follow you between machines.",
+            font=_BODY, bg=PANEL, fg=MUTED, wraplength=500, justify="left")
+        self.notes_note.pack(anchor="w", pady=(12, 0))
+
+    def _browse_notes(self):
+        """Choose the notes folder. A folder that can't be written to is
+        refused here, where it is one dialog away from being fixed, rather
+        than at the end of a meeting nobody can save."""
+        chosen = filedialog.askdirectory(
+            parent=self.root, title="Choose where meeting notes are saved",
+            mustexist=False)
+        if not chosen:
+            return
+        chosen = os.path.normpath(chosen)
+        problem = folder_problem(chosen)
+        if problem:
+            self.notes_note.configure(text=problem, fg=DANGER)
+            return
+        self.notes_dir.set(chosen)
+        self.notes_note.configure(
+            text="New notes are written here. Anything already saved stays "
+                 "where it is — move those yourself if you want them together.",
+            fg=MUTED)
+
+    def _default_notes(self):
+        self.notes_dir.set(default_notes_dir())
+        self.notes_note.configure(
+            text="Back to the standard location, inside your per-user data "
+                 "folder.", fg=MUTED)
+
+    @staticmethod
+    def _language_label(code) -> str:
+        """The picker's label for a config value ("en" -> "English")."""
+        wanted = code or languages.AUTO
+        for value, label in languages.choices():
+            if value == wanted:
+                return label
+        return languages.name_for(code)
+
+    def _step_language(self):
+        self._heading(
+            "What language are your meetings in?",
+            "Pinning the language is faster and more accurate than detecting "
+            "it: meeting speech comes in short bursts, which is exactly where "
+            "detection guesses wrong.")
+
+        self._lang_labels = {label: code for code, label in languages.choices()}
+        self.language = tk.StringVar(value=self.choices.get(
+            "language", self._language_label(DEFAULT_LANGUAGE)))
+        ttk.Combobox(self.body, textvariable=self.language, state="readonly",
+                     width=34,
+                     values=[label for _, label in languages.choices()]).pack(
+            anchor="w", pady=(20, 0))
+
+        card = tk.Frame(self.body, bg=PANEL, highlightbackground=EDGE,
+                        highlightthickness=1, padx=16, pady=14)
+        card.pack(fill="x", pady=(20, 0))
+        tk.Label(card, text="Meetings that switch languages",
+                 font=_BODY, bg=PANEL, fg=PAPER).pack(anchor="w")
+        tk.Label(card, text="Choose “Auto-detect” instead. Each line is then "
+                            "worked out on its own and tagged with the language "
+                            "it was heard as, so a wrong guess is visible rather "
+                            "than silent.",
+                 font=_BODY, bg=PANEL, fg=MUTED, wraplength=500,
+                 justify="left").pack(anchor="w", pady=(4, 0))
 
     def _step_speech(self):
         self._heading(
@@ -399,9 +525,31 @@ class Wizard:
                      anchor="w", wraplength=340, justify="left").pack(side="left")
 
     # -- results -----------------------------------------------------------
+    def _language_code(self):
+        """The chosen language code, or None for auto-detect. Absent when the
+        user closed the wizard before the language step ever drew."""
+        var = getattr(self, "language", None)
+        label = var.get() if var is not None else self.choices.get("language", "")
+        if not label:
+            return ""
+        return getattr(self, "_lang_labels", {}).get(label, languages.AUTO)
+
+    def _notes_choice(self) -> str:
+        """The notes folder on screen, or "" if step one never drew."""
+        var = getattr(self, "notes_dir", None)
+        chosen = var.get() if var is not None else self.choices.get("notes_dir", "")
+        return os.path.normpath(chosen.strip()) if chosen.strip() else ""
+
     def _pending(self) -> dict:
         """What Finish will save, in human terms."""
         out = {}
+        notes = self._notes_choice()
+        if notes:
+            out["Notes folder"] = notes
+        code = self._language_code()
+        if code:
+            out["Spoken language"] = languages.name_for(
+                languages.normalize(code))
         custom = getattr(self, "custom_model", None)
         custom = custom.get().strip() if custom else ""
         if custom:
@@ -417,6 +565,20 @@ class Wizard:
     def _save(self):
         """Write the choices. A failure here must not trap the user."""
         changes = {}
+        notes = self._notes_choice()
+        if notes:
+            # The default is stored as the plain name config.py ships, not as
+            # an absolute path: a profile that moves between machines (or a
+            # user whose account is renamed) should follow the data folder
+            # rather than point at a path that no longer exists.
+            changes["OUTPUT_DIR"] = ("notes"
+                                     if notes == os.path.normpath(default_notes_dir())
+                                     else notes)
+        code = self._language_code()
+        if code:
+            # normalize() turns the "auto" the picker speaks into the None the
+            # transcriber wants.
+            changes["WHISPER_LANGUAGE"] = languages.normalize(code)
         custom = getattr(self, "custom_model", None)
         custom = custom.get().strip() if custom else ""
         if custom:
@@ -466,8 +628,6 @@ class Wizard:
 # ---------------------------------------------------------------------------
 def needed() -> bool:
     """True when nobody has been through setup on this machine yet."""
-    import os
-
     return not os.path.isfile(settings.path())
 
 

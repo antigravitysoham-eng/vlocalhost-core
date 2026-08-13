@@ -309,7 +309,7 @@ def main(argv):
         setup_wizard.run()
         return 0
 
-    # First run, and a window is what they're getting: ask the two questions
+    # First run, and a window is what they're getting: ask the setup questions
     # before the app opens. Skipped for the tray, the terminal and MCP, which
     # are either headless or driven by something that can't answer.
     if not any(f in argv for f in ("--tray", "--no-tray", "--mcp",
