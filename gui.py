@@ -37,7 +37,8 @@ MUTED = "#7E8AA0"
 DANGER = "#E8624F"
 
 #: Callables run just before the window is destroyed, in registration order.
-#: Populated only by optional packages — the core registers none of its own.
+#: Core registers one of its own (the tip prompt, in :func:`run`); optional
+#: packages add theirs from their ``register()``.
 _exit_hooks = []
 
 
@@ -50,9 +51,9 @@ def register_exit_hook(hook):
     and a hook that raises is reported and skipped — quitting must always
     succeed.
 
-    This is an extension point. The core ships no hooks; a package that
-    wants a word with the user on the way out registers one from its
-    ``register()``.
+    This is an extension point. Core registers the tip prompt through it; a
+    package that wants a word with the user on the way out registers its own
+    from ``register()``.
     """
     _exit_hooks.append(hook)
 
@@ -1073,6 +1074,17 @@ class App:
 
 def run():
     """Open the window. Returns when the user closes it."""
+    # The tip prompt is Core's own — it asks on behalf of the free product —
+    # but it stays an ordinary hook, registered here rather than wired into
+    # the close path, so deleting the module is all it takes to remove it.
+    # A failure must never keep the window from opening.
+    try:
+        import support_prompt
+
+        register_exit_hook(support_prompt.maybe_show)
+    except Exception as e:  # noqa: BLE001
+        print(f"[gui] support prompt unavailable: {e}", flush=True)
+
     root = tk.Tk()
     app = App(root)
     # Auto-record from the calendar if the user turned it on.
