@@ -242,6 +242,24 @@ def write_launchers(staging, target):
             f.write('@echo off\r\n'
                     'start "" "%~dp0runtime\\pythonw.exe" '
                     '"%~dp0app\\vlocalhost.py" %*\r\n')
+
+        # The ZIP has no installer, so nothing creates the desktop icon the
+        # .exe would have made. The app can do it — --install-shortcut has
+        # shipped since 1.0.3 — but only if somebody knows to type it, and
+        # people who took the portable build are precisely the ones least
+        # likely to open a terminal. Two double-clickable files instead.
+        helpers = {
+            "Create desktop shortcut.cmd": "--install-shortcut",
+            "Remove desktop shortcut.cmd": "--remove-shortcut",
+        }
+        for name, flag in helpers.items():
+            with open(os.path.join(staging, name), "w",
+                      encoding="utf-8", newline="\r\n") as f:
+                f.write('@echo off\r\n'
+                        '"%~dp0runtime\\python.exe" "%~dp0app\\vlocalhost.py" '
+                        + flag + '\r\n'
+                        'echo.\r\n'
+                        'pause\r\n')
     else:
         path = os.path.join(staging, "Vlocalhost.sh")
         with open(path, "w", encoding="utf-8", newline="\n") as f:
