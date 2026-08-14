@@ -168,13 +168,28 @@ class LoopbackListener:
             return False, ("macOS has no built-in loopback. Install a virtual "
                            "device such as BlackHole, route the call's audio "
                            "into it, and set INPUT_DEVICE in config.py.")
+        # Name the device and say what to do. "No loopback device available"
+        # on its own sends people hunting for a driver, when the usual causes
+        # are a playback device that changed under the app (a headset
+        # connecting) or another program holding it exclusively.
         try:
             import soundcard as sc
 
-            sc.get_microphone(str(sc.default_speaker().name),
-                              include_loopback=True)
-        except Exception as e:  # noqa: BLE001 - no output device, etc.
-            return False, f"No loopback device available ({e})."
+            speaker = sc.default_speaker()
+        except Exception as e:  # noqa: BLE001
+            return False, ("Windows reports no playback device, so there is "
+                           f"nothing to capture ({e}). Plug in or enable a "
+                           "speaker or headset, then press Start again. Your "
+                           "microphone still records on its own — choose "
+                           "“My microphone only”.")
+        try:
+            sc.get_microphone(str(speaker.name), include_loopback=True)
+        except Exception as e:  # noqa: BLE001
+            return False, (f"Could not tap “{speaker.name}” for meeting audio "
+                           f"({e}). This usually means the playback device "
+                           "changed while the app was open, or another program "
+                           "has it exclusively. Reconnect it and press Start "
+                           "again, or record your microphone only.")
         return True, "ready"
 
     def start(self):

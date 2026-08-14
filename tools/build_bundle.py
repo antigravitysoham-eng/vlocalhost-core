@@ -320,6 +320,12 @@ def build(target, out_dir, workdir, skip_tests=False):
     os.makedirs(workdir, exist_ok=True)
     staging = os.path.join(workdir, f"stage-{target}")
     shutil.rmtree(staging, ignore_errors=True)
+    if os.path.exists(staging):
+        raise SystemExit(
+            f"Could not clear {staging}.\n"
+            "Something is holding it open — most often a shell or a file "
+            "manager whose current directory is inside it, or the app running "
+            "from this build. Close it and run again.")
     os.makedirs(staging)
 
     runtime = fetch_runtime(target, workdir)
@@ -333,6 +339,13 @@ def build(target, out_dir, workdir, skip_tests=False):
 
     if not skip_tests:
         smoke_test(os.path.join(staging, "runtime"), app_dir)
+
+    # The smoke test imports the app, and Python writes __pycache__ where it
+    # imports from. Those files are not payload: the zip is packed now and the
+    # installer is packed later from the same tree, so anything created between
+    # the two makes the artifacts disagree. Remove them here, after the last
+    # thing that can create them.
+    prune_bytecode(app_dir)
 
     archive = zip_bundle(staging, out_dir, target)
     digest = sha256(archive)
@@ -350,8 +363,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--target", required=True, choices=sorted(TARGETS),
                         help="platform to build for; must match this machine")
-    parser.add_argument("--out", default="dist", help="where to write the zip")
-    parser.add_argument("--work", default="build",
+    parser.add_argument("--out", default=os.path.join(ROOT, "dist"),
+                        help="where to write the zip (default: <repo>/dist)")
+    parser.add_argument("--work", default=os.path.join(ROOT, "build"),
                         help="scratch directory (downloads are cached here)")
     parser.add_argument("--skip-tests", action="store_true",
                         help="skip the smoke test (not for releases)")

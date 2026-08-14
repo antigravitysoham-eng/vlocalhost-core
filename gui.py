@@ -636,7 +636,11 @@ class App:
         capture = ttk.LabelFrame(parent, text="What to listen to",
                                  style="Card.TLabelframe", padding=14)
         capture.pack(fill="x")
-        self.capture_var = tk.StringVar(value=current.get("CAPTURE_MODE") or "mic")
+        # config.py ships "both" — mic and meeting audio. Falling back to
+        # anything else here would let the Settings tab disagree with the
+        # documented default about which sources a recording uses.
+        self.capture_var = tk.StringVar(
+            value=current.get("CAPTURE_MODE") or config.CAPTURE_MODE or "both")
         for value, text in (
             ("both", "My microphone and the meeting audio  —  both sides of a "
                      "video call, labelled “You” and “Participants”"),
