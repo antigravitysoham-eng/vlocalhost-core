@@ -12,9 +12,11 @@ touching the window code.
 Rules this follows, because a donation prompt that ignores them is spam:
 
 * It never appears before the notes are saved. The hook runs after shutdown.
-* It never appears on the first close. Someone who has used the app once has
-  no idea yet whether they like it.
-* It appears at most once a fortnight.
+* It appears on every close, including the first. This is a deliberate product
+  decision, taken for launch and easily reversed: raise
+  :data:`CLOSES_BEFORE_FIRST_ASK` to wait a few closes, and
+  :data:`DAYS_BETWEEN_ASKS` above zero to space them out. Both gates are still
+  here and still honoured.
 * Every failure path is silent. A tip prompt must not be the reason an app
   refuses to quit.
 
@@ -36,8 +38,10 @@ UPI_ID = "mitrasoham@ybl"
 PAYEE = "Soham Mitra"
 
 #: Closes to sit through before the first ask, and days between asks after.
-CLOSES_BEFORE_FIRST_ASK = 3
-DAYS_BETWEEN_ASKS = 14
+#: 1 and 0 mean "every close, starting with the first". The gates below are
+#: unchanged, so restoring a quieter cadence is a two-number edit.
+CLOSES_BEFORE_FIRST_ASK = 1
+DAYS_BETWEEN_ASKS = 0
 
 # Core's palette. Duplicated rather than imported so this module keeps working
 # if Core reorganises its brand tokens.
