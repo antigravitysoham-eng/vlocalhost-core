@@ -24,8 +24,8 @@
 
 #define AppName      "Vlocalhost.AI"
 #define AppPublisher "Vlocalhost"
-#define AppURL       "https://antigravitysoham-eng.github.io/vlocalhost-ai/"
-#define SupportURL   "https://antigravitysoham-eng.github.io/vlocalhost-ai/support/"
+#define AppURL       "https://vlocal.host/"
+#define SupportURL   "https://vlocal.host/support/"
 ; Relative to SourceDir (the repo root), NOT to this file. Writing it as
 ; "..\..\build\..." instead adds 19 characters to every one of the ~30,000
 ; paths Inno handles, which is enough to cross Windows' 260-character limit

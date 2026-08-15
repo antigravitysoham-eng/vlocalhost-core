@@ -29,7 +29,7 @@ from datetime import datetime
 
 from version import __version__ as APP_VERSION
 
-SUPPORT_URL = "https://antigravitysoham-eng.github.io/vlocalhost-ai/support/"
+SUPPORT_URL = "https://vlocal.host/support/"
 
 LOG_NAME = "vlocalhost.log"
 REPORT_NAME = "vlocalhost-report.txt"
@@ -218,7 +218,7 @@ def open_support() -> None:
         print(f"Support: {SUPPORT_URL}", flush=True)
 
 
-GUIDE_URL = "https://antigravitysoham-eng.github.io/vlocalhost-ai/install/guide/"
+GUIDE_URL = "https://vlocal.host/install/guide/"
 _GUIDE_PDF = "vlocalhost-installation-guide.pdf"
 
 

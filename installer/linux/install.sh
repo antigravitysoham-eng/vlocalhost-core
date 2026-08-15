@@ -23,7 +23,7 @@ DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/vlocalhost"
 DESKTOP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 ICON_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/512x512/apps"
 DESKTOP_FILE="$DESKTOP_DIR/vlocalhost.desktop"
-SUPPORT_URL="https://antigravitysoham-eng.github.io/vlocalhost-ai/support/"
+SUPPORT_URL="https://vlocal.host/support/"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PREFIX="$DEFAULT_PREFIX"
