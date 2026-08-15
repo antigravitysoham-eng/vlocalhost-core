@@ -86,7 +86,9 @@ class App:
         self._ui_q = queue.Queue()   # work marshalled back onto the Tk thread
         self._busy = False           # a start/stop is in flight
 
-        self.engine = engine_mod.build(on_line=self._line_from_worker)
+        self._partial_open = False   # a provisional line is on screen
+        self.engine = engine_mod.build(on_line=self._line_from_worker,
+                                       on_partial=self._partial_from_worker)
 
         root.title("Vlocalhost.AI — Meeting Notes")
         root.geometry("940x660")
@@ -280,6 +282,9 @@ class App:
         scroll.pack(side="right", fill="y")
         self.transcript.configure(yscrollcommand=scroll.set, state="disabled")
         self.transcript.tag_configure("hint", foreground=MUTED)
+        # Provisional text, dimmed so it reads as "still being said" rather
+        # than as a line that has been committed to the transcript.
+        self.transcript.tag_configure("partial", foreground=MUTED)
         self._say("Silence is ignored — lines appear when someone speaks.", "hint")
 
         self.result_label = ttk.Label(parent, text="", style="Muted.TLabel",
@@ -287,14 +292,43 @@ class App:
         self.result_label.pack(anchor="w", pady=(10, 0))
 
     def _say(self, text, tag=None):
+        # A finished line supersedes whatever preview is showing.
+        self._clear_partial()
         self.transcript.configure(state="normal")
         self.transcript.insert("end", text + "\n", tag or ())
         self.transcript.see("end")
         self.transcript.configure(state="disabled")
 
+    def _show_partial(self, text):
+        """Draw provisional text, replacing any already on screen."""
+        self.transcript.configure(state="normal")
+        if self._partial_open:
+            self.transcript.delete("partial_start", "end-1c")
+        else:
+            self.transcript.mark_set("partial_start", "end-1c")
+            # Left gravity keeps the mark where the preview began as text is
+            # inserted after it; the default would drag it along to the end.
+            self.transcript.mark_gravity("partial_start", "left")
+            self._partial_open = True
+        self.transcript.insert("end", text + "\n", "partial")
+        self.transcript.see("end")
+        self.transcript.configure(state="disabled")
+
+    def _clear_partial(self):
+        if not self._partial_open:
+            return
+        self._partial_open = False
+        self.transcript.configure(state="normal")
+        self.transcript.delete("partial_start", "end-1c")
+        self.transcript.configure(state="disabled")
+
     def _line_from_worker(self, line):
         """Called from the transcription thread — hop onto the Tk thread."""
         self._ui_q.put(lambda: self._say(line))
+
+    def _partial_from_worker(self, text):
+        """Same, for provisional text. Tk is not thread-safe."""
+        self._ui_q.put(lambda: self._show_partial(text))
 
     def _toggle_record(self):
         if self._busy:
@@ -319,6 +353,7 @@ class App:
     def _started(self):
         self._busy = False
         title = self.engine.event.title if self.engine.event else None
+        self._partial_open = False   # the mark goes with the cleared text
         self.transcript.configure(state="normal")
         self.transcript.delete("1.0", "end")
         self.transcript.configure(state="disabled")
@@ -336,6 +371,7 @@ class App:
 
     def _stop_worker(self):
         result = self.engine.stop_and_save()
+        self._ui_q.put(self._clear_partial)   # nothing provisional survives a stop
         self._ui_q.put(lambda: self._stopped(result))
 
     def _stopped(self, result):

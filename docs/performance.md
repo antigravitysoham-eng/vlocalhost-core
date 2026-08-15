@@ -46,6 +46,45 @@ pauses, so falling briefly behind delays a line appearing but never drops audio.
 Sustained lag on a long meeting is the thing to avoid, which is why `small` is
 not the default.
 
+## Latency, which is not the same as speed
+
+How fast the model runs and how long you wait to see a word are different
+numbers. A line cannot appear until the speaker pauses long enough to end the
+utterance (`SILENCE_TIMEOUT_MS`, 800 ms) and the model has then decoded it. On
+an M-series Mac with `base`, that decode is **~400–550 ms for anything up to
+about 8 s of audio** — there is a fixed encoder cost per pass, so a 2 s
+utterance costs nearly what an 8 s one does. Only past ~10 s does length begin
+to dominate (16 s → ~1.1 s).
+
+The consequence is that a long sentence shows nothing at all until it ends.
+Speak for six seconds and the first text arrives in the seventh.
+
+**`LIVE_PARTIALS`** (on by default) fills that gap: while someone is still
+talking, the utterance so far is transcribed every `PARTIAL_INTERVAL_MS` and
+shown as dimmed provisional text, which the finished line then replaces.
+Measured on the same machine against a 16 s spoken paragraph:
+
+| | first text on screen | line committed after speaker stops |
+|---|---|---|
+| Partials off | +6.5 s | 0.8–1.1 s |
+| Partials on | **+1.8 s**, refreshing every ~0.7 s | 0.6–1.3 s |
+
+The right-hand column barely moves — partials don't make the transcript
+faster, they make the wait visible. Nothing provisional is ever saved: the
+committed line is transcribed from the whole utterance, so the file on disk is
+identical either way.
+
+The cost is another decode pass per interval, which is why it is a switch. Two
+passes never run at once, a stale preview is dropped rather than run late, and
+a finished utterance always takes priority — so the worst case is CPU spent,
+not a line arriving later. Turn it off (Settings, or `LIVE_PARTIALS = False`)
+on a machine that is already working hard.
+
+`SILENCE_TIMEOUT_MS` looks like the latency knob and mostly isn't: halving it
+to 400 ms moved the committed line by about 0.1 s, and split the same paragraph
+into twice as many lines, because the pauses inside a sentence started ending
+it.
+
 ## What makes it light
 
 - **`base` multilingual, not `small`.** Half the RAM and ~4× the speed of
