@@ -39,10 +39,51 @@ INPUT_DEVICE = None
 VAD_AGGRESSIVENESS = 2
 
 # End an utterance after this much continuous silence, then transcribe it.
+#
+# This looks like the latency knob and mostly isn't. Measured on an M-series
+# Mac with the "base" model, halving it to 400 ms moved the finished line from
+# 1.06 s to 0.95 s after the speaker stopped — the decode dominates — while
+# splitting the same paragraph into four lines instead of two, because the
+# pauses inside a sentence started ending it. LIVE_PARTIALS below is what
+# actually removes the wait. Lower this only if you want lines to commit in
+# smaller pieces, and know that is what you are choosing.
 SILENCE_TIMEOUT_MS = 800
+
+# How much speech has to arrive before capture begins. Separate from the
+# silence timeout so that shortening one doesn't make the other trigger-happy —
+# they were a single value, which meant a quicker cut-off also let a cough
+# start a segment.
+SPEECH_TRIGGER_MS = 240
+
+# Audio kept from *before* the trigger fired, so the first syllable isn't
+# clipped off the front of the utterance that gets transcribed.
+PREROLL_MS = 300
 
 # Ignore blips shorter than this (coughs, clicks) to avoid junk transcripts.
 MIN_UTTERANCE_MS = 300
+
+# --- Live (partial) transcription ----------------------------------------
+# Transcribe what has been said *so far*, while the person is still speaking,
+# and show it as provisional text that the finished line replaces. Waiting for
+# the pause is what makes transcription feel slow; this fills the wait.
+#
+# It costs real CPU: another pass over the utterance every interval, on top of
+# the final one. The encoder cost is roughly fixed per pass rather than
+# proportional to length (~400 ms for "base" on an M-series Mac, ~200 ms for
+# "tiny"), which is what makes it affordable at all. Turn it off on a machine
+# that is already working hard, or when running on battery.
+LIVE_PARTIALS = True
+
+# How often to refresh the provisional text. Setting this below the time one
+# pass takes doesn't make it faster — passes are never queued up, and a stale
+# one is dropped rather than run late — it just spends more CPU.
+PARTIAL_INTERVAL_MS = 700
+
+# Only ever re-transcribe the last N seconds for a provisional line. A long
+# uninterrupted monologue would otherwise get slower to preview the longer it
+# ran. The final line is always transcribed whole, so nothing is lost from the
+# saved transcript — only the preview is clipped.
+PARTIAL_MAX_SECONDS = 12
 
 # --- Transcription: bring your own voice model ---------------------------
 # The speech-to-text engine. Default is faster-whisper, running fully local.

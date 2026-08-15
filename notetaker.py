@@ -38,17 +38,28 @@ def _unique(path):
 
 
 class NoteTaker:
-    def __init__(self, on_line=None, provider=None):
+    def __init__(self, on_line=None, provider=None, on_partial=None):
         """on_line(text) is called for each newly transcribed line (for live UI).
+        on_partial(text) is called with provisional text while someone is still
+        speaking; the next on_line replaces it. Front ends that cannot show
+        provisional text simply leave it None, and no partial work is done.
         provider: optional CalendarProvider for naming/email/post-back."""
         self.on_line = on_line or (lambda text: None)
+        self.on_partial = on_partial
         self.provider = provider
 
         self.transcriber = build_transcriber()  # faster-whisper, or your own engine
         # Mic, system audio, or both — see config.CAPTURE_MODE.
-        self.listener = build_listener(self._on_utterance)
+        self.listener = build_listener(
+            self._on_utterance,
+            self._on_partial_audio if on_partial else None)
 
         self._utt_q = queue.Queue()
+        # Only ever the most recent provisional segment. A queue would let
+        # previews pile up behind each other and arrive describing speech that
+        # finished seconds ago, which is worse than not showing them at all.
+        self._pending_partial = None
+        self._partial_lock = threading.Lock()
         self._transcript = []
         self._lock = threading.Lock()
         self._worker = None
@@ -75,6 +86,8 @@ class NoteTaker:
             return self.transcript_text()
         self.listening = False
         self.listener.stop()          # flushes any in-progress utterance
+        with self._partial_lock:
+            self._pending_partial = None  # don't preview audio we've stopped for
         if self._worker is not None:
             self._worker.join(timeout=30)  # let the queue drain
             self._worker = None
@@ -85,34 +98,72 @@ class NoteTaker:
         """One detected speech segment, tagged with the source it came from."""
         self._utt_q.put((pcm_bytes, label))
 
+    def _on_partial_audio(self, pcm_bytes, label=None):
+        """A segment that is still being spoken. Latest one wins."""
+        if not getattr(config, "LIVE_PARTIALS", True):
+            return
+        with self._partial_lock:
+            self._pending_partial = (pcm_bytes, label)
+
+    def _take_partial(self):
+        with self._partial_lock:
+            pending, self._pending_partial = self._pending_partial, None
+        return pending
+
+    def _next_job(self):
+        """(pcm, label, is_final) for the transcriber, or None when idle.
+
+        Finished utterances always win: a preview is worth nothing once the
+        real line is ready, and letting one delay the other would trade the
+        latency we are trying to remove for latency somewhere else.
+        """
+        try:
+            pcm, label = self._utt_q.get(timeout=0.05)
+        except queue.Empty:
+            pending = self._take_partial()
+            return (*pending, False) if pending else None
+        # Whatever preview was waiting describes audio this line now covers.
+        self._take_partial()
+        return pcm, label, True
+
+    def _format(self, text, label):
+        """A transcript line: timestamp, who spoke, and the words."""
+        ts = datetime.now().strftime("%H:%M:%S")
+        # Only name the speaker when we're capturing more than one source —
+        # a mic-only transcript has nobody to distinguish.
+        who = label or ""
+        # When auto-detecting, show what language this line was heard as, so a
+        # misdetection is visible instead of silent.
+        if (config.SHOW_DETECTED_LANGUAGE
+                and config.WHISPER_LANGUAGE in (None, "auto")):
+            detected = getattr(self.transcriber, "last_language", None)
+            if detected:
+                who = f"{who} ({detected})" if who else f"({detected})"
+        return f"[{ts}] {who}: {text}" if who else f"[{ts}] {text}"
+
     def _transcribe_loop(self):
         while self.listening or not self._utt_q.empty():
-            try:
-                pcm, label = self._utt_q.get(timeout=0.2)
-            except queue.Empty:
+            job = self._next_job()
+            if job is None:
                 continue
+            pcm, label, is_final = job
             try:
                 text = self.transcriber.transcribe(pcm)
             except Exception as e:  # noqa: BLE001 - keep listening on a bad chunk
                 print(f"[transcribe error] {e}")
                 continue
-            if text:
-                ts = datetime.now().strftime("%H:%M:%S")
-                # Only name the speaker when we're capturing more than one
-                # source — a mic-only transcript has nobody to distinguish.
-                who = label or ""
-                # When auto-detecting, show what language this line was heard
-                # as, so a misdetection is visible instead of silent.
-                if (config.SHOW_DETECTED_LANGUAGE
-                        and config.WHISPER_LANGUAGE in (None, "auto")):
-                    detected = getattr(self.transcriber, "last_language", None)
-                    if detected:
-                        who = f"{who} ({detected})" if who else f"({detected})"
-                line = f"[{ts}] {who}: {text}" if who else f"[{ts}] {text}"
-                with self._lock:
-                    self._transcript.append(line)
-                self._dirty = True
-                self.on_line(line)
+            if not text:
+                continue
+            if not is_final:
+                # Provisional: shown, never recorded. The finished line that
+                # follows is the one that reaches the transcript and the file.
+                self.on_partial(self._format(text, label))
+                continue
+            line = self._format(text, label)
+            with self._lock:
+                self._transcript.append(line)
+            self._dirty = True
+            self.on_line(line)
 
     # -- output ---------------------------------------------------------------
     def transcript_text(self):
