@@ -26,6 +26,12 @@ jobs:
   bundle:
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
+    # A label with no runner behind it does not fail — it queues, for the full
+    # 24-hour job limit, and takes the release job down with it when it finally
+    # times out. That is how v1.1.0 and v1.1.1 lost their macOS builds. An hour
+    # is well past the slowest honest build here, so this can only fire when
+    # something is actually wrong.
+    timeout-minutes: 60
     strategy:
       fail-fast: false        # one platform failing must not hide the others
       matrix:
@@ -35,7 +41,10 @@ jobs:
           - target: macos-arm64
             runner: macos-14
           - target: macos-x64
-            runner: macos-13
+            # Apple silicon cannot build x86_64 wheels, so the Intel bundle
+            # needs a genuinely Intel runner. macos-13 was that runner until
+            # GitHub retired the image; macos-15-intel is its replacement.
+            runner: macos-15-intel
           - target: linux-x64
             # Oldest still-supported runner, for the widest glibc range: a
             # bundle built against a newer glibc will not start on an older
@@ -78,6 +87,25 @@ jobs:
             /DAppVersion=$(python -c "import version; print(version.__version__)") `
             installer\windows\vlocalhost.iss
 
+      # notarytool wants the App Store Connect key as a file on disk, so the
+      # base64 secret has to be written out before the build can use it. Under
+      # $RUNNER_TEMP it goes away with the runner. Without this step
+      # AC_API_KEY_PATH is never set and the build silently skips notarizing,
+      # however many of the other secrets are configured.
+      - name: Stage the notarization key
+        if: startsWith(matrix.target, 'macos')
+        env:
+          AC_API_KEY: ${{ secrets.AC_API_KEY }}
+        run: |
+          if [ -z "$AC_API_KEY" ]; then
+            echo "No AC_API_KEY secret — this build will not be notarized."
+            exit 0
+          fi
+          key="$RUNNER_TEMP/ac-api-key.p8"
+          printf '%s' "$AC_API_KEY" | base64 --decode > "$key"
+          chmod 600 "$key"
+          echo "AC_API_KEY_PATH=$key" >> "$GITHUB_ENV"
+
       - name: macOS app + DMG
         if: startsWith(matrix.target, 'macos')
         env:
@@ -100,13 +128,24 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: vlocalhost-${{ matrix.target }}
-          path: dist/*
+          # Vlocalhost.app is the staging tree the DMG was built from, not a
+          # release asset. Uploading it as well means sending the whole bundle
+          # twice, uncompressed, for nothing.
+          path: |
+            dist/*
+            !dist/*.app
           retention-days: 14
 
   draft-release:
     name: draft release
     needs: bundle
-    if: startsWith(github.ref, 'refs/tags/v')
+    # `needs` alone means any one platform failing throws away the platforms
+    # that succeeded — v1.1.1 built a working macOS DMG that nobody ever saw,
+    # because Windows and the dead Intel runner failed alongside it. The draft
+    # is human-gated, so a partial one is something to look at and decide on,
+    # never something that ships by itself. "Check the platforms" below prints
+    # what is missing so an incomplete draft cannot be mistaken for a full one.
+    if: always() && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -118,15 +157,35 @@ jobs:
       - name: Collect assets
         run: |
           mkdir -p dist
-          find staged -type f \( -name '*.zip' -o -name '*.sha256' \) \
+          # Installers are the point of the release: the .dmg and .exe are what
+          # the install page looks for by name, and globbing only *.zip left
+          # both on the floor.
+          find staged -type f \( -name '*.zip' -o -name '*.exe' \
+            -o -name '*.dmg' -o -name '*.tar.gz' -o -name '*.sha256' \) \
             -exec cp {} dist/ \;
           cat dist/*.sha256 > dist/SHA256SUMS
           ls -lh dist
 
+      - name: Check the platforms
+        run: |
+          missing=""
+          for asset in windows-x64-setup.exe macos-arm64.dmg \
+                       macos-x64.dmg linux-x64.tar.gz; do
+            ls dist/*"$asset" >/dev/null 2>&1 || missing="$missing $asset"
+          done
+          if [ -n "$missing" ]; then
+            echo "::warning::Draft is incomplete — no build for:$missing"
+          else
+            echo "All four platforms present."
+          fi
+
       - name: Check the tag matches version.py
         run: |
+          # python3, not python: this job has no setup-python step, and the
+          # bare name is not guaranteed on the runner image. Until now the job
+          # never reached this line, so the difference had never shown up.
           tag="${GITHUB_REF_NAME#v}"
-          code="$(python -c 'import version; print(version.__version__)')"
+          code="$(python3 -c 'import version; print(version.__version__)')"
           echo "tag=$tag  version.py=$code"
           test "$tag" = "$code" || {
             echo "::error::Tag $GITHUB_REF_NAME does not match version.py ($code)"
