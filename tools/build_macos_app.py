@@ -102,6 +102,18 @@ def build_app(stage, out_dir):
             '# Resolve everything relative to the bundle so the app can be\n'
             '# moved to any volume and still find its own interpreter.\n'
             'HERE="$(cd "$(dirname "$0")/../Resources" && pwd)"\n'
+            '\n'
+            '# A signature seals the bundle exactly as it was signed, and\n'
+            "# Python's first act is to write .pyc files next to every module\n"
+            '# it imports — 84 __pycache__ directories, inside the app. That\n'
+            '# breaks the seal on first launch: codesign then reports a sealed\n'
+            '# resource as missing or invalid, and Gatekeeper refuses the app\n'
+            '# it had already admitted. The build prunes these; this stops\n'
+            '# them coming back. Startup re-parses the sources instead, which\n'
+            '# costs a fraction of the model load already happening.\n'
+            'PYTHONDONTWRITEBYTECODE=1\n'
+            'export PYTHONDONTWRITEBYTECODE\n'
+            '\n'
             'exec "$HERE/runtime/bin/python3" "$HERE/app/vlocalhost.py" "$@"\n')
     os.chmod(launcher, 0o755)
 
