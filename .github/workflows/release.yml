@@ -83,7 +83,11 @@ jobs:
         shell: pwsh
         run: |
           choco install innosetup -y --no-progress
-          & "$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe" `
+          # ${env:NAME}, not $env:NAME — the parentheses in "Program Files
+          # (x86)" end the variable name, so the bare form expands to
+          # $env:ProgramFiles followed by a literal "(x86)" and looks for
+          # C:\Program Files(x86)\..., which does not exist.
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
             /DAppVersion=$(python -c "import version; print(version.__version__)") `
             installer\windows\vlocalhost.iss
 
