@@ -22,11 +22,19 @@ def sha256(path):
     return digest.hexdigest()
 
 
+#: Everything a release hands out and records a digest for. The DMG is as much
+#: a download as the zip is, and checking only the zip meant the macOS asset
+#: was the one thing shipped unverified.
+CHECKED = (".zip", ".dmg")
+
+
 def main(argv):
     directory = argv[0] if argv else "dist"
-    archives = sorted(f for f in os.listdir(directory) if f.endswith(".zip"))
+    archives = sorted(f for f in os.listdir(directory)
+                      if f.endswith(CHECKED))
     if not archives:
-        print(f"No .zip files in {directory}", file=sys.stderr)
+        print(f"No {' or '.join(CHECKED)} files in {directory}",
+              file=sys.stderr)
         return 1
 
     failed = 0

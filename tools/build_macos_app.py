@@ -10,16 +10,19 @@ the icon. So the app *is* the bundle: everything lives inside the .app, which
 can be moved to any volume and still runs, because every path inside it is
 resolved relative to the bundle.
 
-**This produces an unsigned app, which recent macOS will refuse to open.**
-Gatekeeper blocks unsigned and un-notarized apps outright, and the old
-right-click-to-open escape hatch is gone — the user has to go to System
-Settings › Privacy & Security and approve it explicitly. Signing and
-notarization need an Apple Developer account; :func:`sign_and_notarize` runs
-when the credentials are present in the environment and is skipped, loudly,
-when they are not.
+**Without an Apple Developer account this app is only ad-hoc signed, and
+recent macOS will refuse to open it.** Gatekeeper blocks anything that is not
+notarized, and the old right-click-to-open escape hatch is gone — the user has
+to go to System Settings › Privacy & Security and approve it explicitly. The
+ad-hoc signature does not change that; it only means the bundle is internally
+consistent, so the refusal is the ordinary "unidentified developer" one rather
+than a claim that the download is damaged. :func:`sign_and_notarize` signs for
+real, and notarizes, when the credentials are present in the environment, and
+says loudly when they are not.
 """
 
 import argparse
+import hashlib
 import os
 import plistlib
 import shutil
@@ -38,6 +41,14 @@ BUNDLE_ID = "ai.vlocalhost.app"
 
 def log(message):
     print(f"[macos] {message}", flush=True)
+
+
+def sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def build_app(stage, out_dir):
@@ -101,28 +112,86 @@ def build_app(stage, out_dir):
     return app
 
 
+#: Mach-O magic numbers, thin and fat, both byte orders. Everything carrying
+#: one has to be signed in its own right; the rest of the bundle is data that
+#: the enclosing signature already covers.
+_MACHO_MAGIC = {
+    b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",   # 32-bit
+    b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",   # 64-bit
+    b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",   # universal
+}
+
+
+def _is_macho(path):
+    if os.path.islink(path) or not os.path.isfile(path):
+        return False
+    try:
+        with open(path, "rb") as f:
+            return f.read(4) in _MACHO_MAGIC
+    except OSError:
+        return False
+
+
+def _inner_binaries(app):
+    """Every Mach-O inside the bundle, deepest first.
+
+    codesign seals what it finds at the moment it runs, so a nested binary
+    signed after its container invalidates that container. Sorting by depth
+    means each thing is signed before anything that encloses it.
+    """
+    found = []
+    for directory, _, files in os.walk(app):
+        for name in files:
+            path = os.path.join(directory, name)
+            if _is_macho(path):
+                found.append(path)
+    return sorted(found, key=lambda p: p.count(os.sep), reverse=True)
+
+
 def sign_and_notarize(app):
     """Sign, notarize and staple — when the credentials are there.
 
     Expects, from the CI secrets:
         MACOS_SIGN_IDENTITY   "Developer ID Application: Name (TEAMID)"
         AC_API_KEY_ID / AC_API_ISSUER / AC_API_KEY_PATH   App Store Connect key
+
+    With no identity the bundle is still signed, ad hoc. That buys no trust —
+    Gatekeeper still refuses it on another Mac — but it does keep the runtime
+    we ship internally consistent, so the failure is the honest "unidentified
+    developer" prompt rather than "the application is damaged".
     """
     identity = os.environ.get("MACOS_SIGN_IDENTITY")
-    if not identity:
+    adhoc = not identity
+    if adhoc:
         log("NOT SIGNED — no MACOS_SIGN_IDENTITY in the environment.")
         log("Gatekeeper will refuse to open this build on another Mac.")
-        return False
+        log("Falling back to an ad-hoc signature.")
 
-    log("signing")
+    # --deep is explicitly not a supported way to sign for notarization: it
+    # applies one set of options to nested code that was never described that
+    # way, and Apple rejects the result. Sign inside-out instead.
     entitlements = os.path.join(HERE, "macos-entitlements.plist")
-    command = ["codesign", "--force", "--deep", "--timestamp",
-               "--options", "runtime", "--sign", identity]
-    if os.path.isfile(entitlements):
-        command += ["--entitlements", entitlements]
+    command = ["codesign", "--force", "--sign", identity or "-"]
+    if not adhoc:
+        # The hardened runtime is required for notarization, and needs the
+        # entitlements that let an interpreter run. Imposing it on an ad-hoc
+        # build only breaks the bundle for no gain, since it cannot notarize.
+        command += ["--timestamp", "--options", "runtime"]
+        if os.path.isfile(entitlements):
+            command += ["--entitlements", entitlements]
+
+    binaries = _inner_binaries(app)
+    log(f"signing {len(binaries)} nested binaries"
+        f"{' (ad hoc)' if adhoc else ''}")
+    for binary in binaries:
+        subprocess.run(command + [binary], check=True,
+                       capture_output=True, text=True)
+    log("signing the app")
     subprocess.run(command + [app], check=True)
     subprocess.run(["codesign", "--verify", "--strict", "--verbose=2", app],
                    check=True)
+    if adhoc:
+        return False
 
     key_id = os.environ.get("AC_API_KEY_ID")
     issuer = os.environ.get("AC_API_ISSUER")
@@ -149,8 +218,12 @@ def build_dmg(app, out_dir, target):
     staging = os.path.join(out_dir, "dmg")
     shutil.rmtree(staging, ignore_errors=True)
     os.makedirs(staging)
-    shutil.copytree(app, os.path.join(staging, os.path.basename(app)),
-                    symlinks=True)
+    # ditto, not copytree: a code signature lives partly in extended
+    # attributes, and copytree drops those. The app would ship looking signed
+    # and fail verification on the machine that opened it.
+    subprocess.run(["ditto", app, os.path.join(staging,
+                                               os.path.basename(app))],
+                   check=True)
     os.symlink("/Applications", os.path.join(staging, "Applications"))
 
     dmg = os.path.join(out_dir, f"vlocalhost-{APP_VERSION}-{target}.dmg")
@@ -161,8 +234,17 @@ def build_dmg(app, out_dir, target):
                     "-srcfolder", staging, "-ov", "-format", "UDZO", dmg],
                    check=True)
     shutil.rmtree(staging, ignore_errors=True)
+
+    # The release collects *.sha256, and publishes them as SHA256SUMS. Without
+    # this the DMG is the one asset nobody can check, and — because that glob
+    # is also how assets are gathered — the one nobody receives.
+    digest = sha256(dmg)
+    with open(dmg + ".sha256", "w", encoding="utf-8") as f:
+        f.write(f"{digest}  {os.path.basename(dmg)}\n")
+
     log(f"done: {os.path.basename(dmg)} "
         f"({os.path.getsize(dmg) / 1_000_000:.0f} MB)")
+    log(f"sha256: {digest}")
     return dmg
 
 
