@@ -100,6 +100,11 @@ Name: "{group}\{#AppName}"; Filename: "{app}\runtime\pythonw.exe"; \
   Parameters: """{app}\app\vlocalhost.py"""; WorkingDir: "{app}\app"; \
   IconFilename: "{app}\app\assets\vlocalhost.ico"; \
   Comment: "Meeting notes that never leave your machine"
+; The guide is copied to the app folder by [Files] above, along with the rest
+; of the staged bundle. Someone who hits trouble looks in the Start menu, not
+; in Program Files, so it needs an entry of its own.
+Name: "{group}\Installation Guide"; Filename: "{app}\Installation Guide.pdf"; \
+  Comment: "Installing, first run, and what each error means"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\runtime\pythonw.exe"; \
   Parameters: """{app}\app\vlocalhost.py"""; WorkingDir: "{app}\app"; \

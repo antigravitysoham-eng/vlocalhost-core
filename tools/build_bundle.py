@@ -233,6 +233,31 @@ def write_manifest(staging, target, packages):
     return manifest
 
 
+#: Shipped at the top of the bundle as well as inside app/docs. Somebody who
+#: unpacks a ZIP and meets a folder of runtime/, app/ and a .cmd has nowhere to
+#: turn when the .cmd does nothing; the guide has to be where they already are.
+GUIDE_PDF = "vlocalhost-installation-guide.pdf"
+GUIDE_VISIBLE_NAME = "Installation Guide.pdf"
+
+
+def copy_guide(staging):
+    """Put the installation guide at the root of the bundle.
+
+    Generated in the vlocalhost-ai repository by ``tools/make_install_guide.py``
+    and committed here — never hand-edit ``docs/`` copy, it is overwritten on
+    the next regeneration. Missing is a warning rather than an error so a
+    contributor's build does not fail over a document.
+    """
+    source = os.path.join(ROOT, "docs", GUIDE_PDF)
+    if not os.path.isfile(source):
+        log(f"WARNING: {GUIDE_PDF} not in docs/ — bundle ships without the guide")
+        return None
+    dest = os.path.join(staging, GUIDE_VISIBLE_NAME)
+    shutil.copy2(source, dest)
+    log(f"guide: {GUIDE_VISIBLE_NAME}")
+    return dest
+
+
 def write_launchers(staging, target):
     """A double-clickable entry point that uses the bundled interpreter."""
     if target.startswith("windows"):
@@ -335,6 +360,7 @@ def build(target, out_dir, workdir, skip_tests=False):
     shutil.move(runtime, os.path.join(staging, "runtime"))
     app_dir = copy_app(os.path.join(staging, "app"))
     write_launchers(staging, target)
+    copy_guide(staging)
     manifest = write_manifest(staging, target, packages)
 
     if not skip_tests:

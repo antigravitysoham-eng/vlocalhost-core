@@ -218,6 +218,63 @@ def open_support() -> None:
         print(f"Support: {SUPPORT_URL}", flush=True)
 
 
+GUIDE_URL = "https://antigravitysoham-eng.github.io/vlocalhost-ai/install/guide/"
+_GUIDE_PDF = "vlocalhost-installation-guide.pdf"
+
+
+def guide_path() -> "str | None":
+    """The installation guide PDF that shipped with this copy, if it did.
+
+    Two places, because the build puts it in two: ``docs/`` beside the app, and
+    the root of the bundle where somebody opening the folder will see it. A
+    checkout run from source has the first and not the second; the macOS bundle
+    has both, one level further up.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = (
+        os.path.join(here, "docs", _GUIDE_PDF),
+        os.path.join(os.path.dirname(here), "Installation Guide.pdf"),
+        os.path.join(os.path.dirname(here), _GUIDE_PDF),
+    )
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def open_guide() -> bool:
+    """Open the shipped guide, falling back to the online one.
+
+    Returns True if a local file was opened. The fallback matters: running from
+    source there is no PDF, and a Help button that does nothing is worse than
+    one that goes to the web.
+    """
+    import subprocess
+    import webbrowser
+
+    path = guide_path()
+    if not path:
+        try:
+            webbrowser.open(GUIDE_URL)
+        except Exception:  # noqa: BLE001
+            print(f"Guide: {GUIDE_URL}", flush=True)
+        return False
+
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(path)  # noqa: S606  (documented Windows API)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", path])
+        else:
+            subprocess.Popen(["xdg-open", path])
+    except Exception:  # noqa: BLE001
+        # No PDF reader, or no desktop session. The file is still on disk and
+        # naming it is more use than a silent failure.
+        print(f"Installation guide: {path}", flush=True)
+        return False
+    return True
+
+
 # ---------------------------------------------------------------------------
 # crash capture
 # ---------------------------------------------------------------------------
