@@ -18,8 +18,16 @@
 *.cmd       text eol=crlf
 
 # Binary — never touch these.
+#
+# *.pdf earns its place the hard way: docs/ now carries the installation guide,
+# and Git classified it as *text* because the file happens to hold no NUL byte
+# near the start. Under `* text=auto` above, a fresh clone on Windows would
+# have rewritten every LF in it to CRLF and produced a PDF no reader opens.
 *.png       binary
+*.pdf       binary
 *.ico       binary
 *.icns      binary
 *.zip       binary
 *.tar.gz    binary
+*.dmg       binary
+*.exe       binary
