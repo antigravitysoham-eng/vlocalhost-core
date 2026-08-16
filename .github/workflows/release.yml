@@ -159,6 +159,12 @@ jobs:
     # what is missing so an incomplete draft cannot be mistaken for a full one.
     if: always() && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    # contents: write to create the draft; the other two let this job sign a
+    # provenance statement for what it is about to publish.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
 
@@ -216,6 +222,34 @@ jobs:
           else
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
+
+      # The downloads are not code-signed -- a certificate costs money and that
+      # was a deliberate decision -- so SmartScreen warns on every one of them
+      # and a user has no way to tell a real build from something wearing its
+      # name. This does not fix that, and nothing free does. What it does is
+      # make the question answerable: each asset gets a signed, publicly
+      # verifiable statement of which commit and which workflow run produced
+      # it, checkable with
+      #     gh attestation verify <file> --repo antigravitysoham-eng/vlocalhost-core
+      # which pairs with the Get-FileHash instructions on the support page.
+      # Only the real downloads are attested; the .sha256 files and SHA256SUMS
+      # are already covered by the digests inside the statement.
+      #
+      # Non-blocking on purpose. A dry run cannot reach this job -- it only
+      # runs for tag pushes -- so the first time this step executes will be on
+      # a real release, and provenance is a nice-to-have that must not be the
+      # reason a finished set of installers fails to reach a draft. If it
+      # fails, the step is red, the release still happens, and it gets fixed
+      # before the next one.
+      - name: Attest what is about to be published
+        uses: actions/attest-build-provenance@v2
+        continue-on-error: true
+        with:
+          subject-path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/*.tar.gz
 
       - name: Create the draft
         uses: softprops/action-gh-release@v2
