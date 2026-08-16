@@ -81,8 +81,9 @@ def rescan_devices():
 #: -9996). Whisper and webrtcvad both need 16 kHz mono, so an entry a user
 #: cannot record from is worse than one with an abbreviated name. DirectSound
 #: resamples, and reports full names; MME resamples, and truncates. Hence this
-#: order. Re-measure before changing it:
-#:     python -c "import sounddevice as sd; ..."  (see docs/models.md)
+#: order. To re-measure: open a RawInputStream at config.SAMPLE_RATE on every
+#: index sd.query_devices() reports with input channels, and keep the APIs that
+#: do not raise. `python vlocalhost.py --devices` lists what each API offers.
 _PREFERRED_HOST_APIS = {
     "Windows": ("Windows DirectSound", "MME"),
     "Darwin": ("Core Audio",),
@@ -250,24 +251,159 @@ def resolve_device(spec, devices=None):
         f"Settings, under 'What to listen to'. Available: {available}")
 
 
+# --- Voice activity detection --------------------------------------------
+# Two detectors behind one interface. The difference between them is not a
+# tuning preference; it decides whether the app works in a room with a fan in
+# it. See docs/performance.md for the measurements.
+
+
+class _WebRtcDetector:
+    """The original: WebRTC's VAD, an energy and spectral-shape heuristic.
+
+    Cheap, dependency-light, and honest about clean speech. It has no model of
+    what speech *is*, so anything with sustained energy reads as talking:
+    measured against the bench fixtures it labels **100% of music** and 82% of
+    café noise as speech. Kept as the fallback, because a machine where the
+    Silero model will not load still has to record.
+    """
+
+    name = "webrtc"
+
+    def __init__(self):
+        self.vad = webrtcvad.Vad(config.VAD_AGGRESSIVENESS)
+        # webrtcvad accepts 10, 20 or 30 ms and nothing else.
+        self.frame_ms = config.FRAME_MS
+        self.frame_size = int(config.SAMPLE_RATE * self.frame_ms / 1000)
+
+    def is_speech(self, frame):
+        return self.vad.is_speech(frame, config.SAMPLE_RATE)
+
+    def reset(self):
+        pass
+
+
+class _SileroDetector:
+    """Silero v6, the neural VAD that faster-whisper already ships.
+
+    No new dependency: the ONNX model sits in ``faster_whisper/assets`` and
+    ``onnxruntime`` is already in the bundle. On the same fixtures it keeps
+    99–100% of non-speech quiet, including music, where webrtcvad keeps none.
+
+    **It needs context.** ``SileroVADModel.__call__`` zeroes its recurrent
+    state on every call, so feeding one 32 ms frame at a time asks the model
+    to judge each frame in isolation — which drops recall from 86% to 67% and
+    is the opposite of what a recurrent detector is for. Feeding a rolling
+    window of the last :data:`CONTEXT_FRAMES` frames and taking the newest
+    probability restores it to 99.3% agreement with scoring the whole file at
+    once. Eight frames is where that curve flattens; sixteen and thirty-two
+    measured no better and cost proportionally more.
+    """
+
+    name = "silero"
+
+    #: Silero v6 is trained on 512-sample windows at 16 kHz. Not adjustable.
+    WINDOW = 512
+    #: How much history each decision sees. 8 x 32 ms = 256 ms, ~0.55 ms of CPU
+    #: per frame, which is under 2% of the frame's own duration.
+    CONTEXT_FRAMES = 8
+
+    def __init__(self):
+        from faster_whisper.vad import get_vad_model
+
+        if config.SAMPLE_RATE != 16000:
+            raise RuntimeError(
+                f"Silero VAD is a 16 kHz model and SAMPLE_RATE is "
+                f"{config.SAMPLE_RATE}.")
+        self._model = get_vad_model()
+        self.frame_size = self.WINDOW
+        self.frame_ms = 1000 * self.WINDOW / config.SAMPLE_RATE  # 32.0
+        self.threshold = float(getattr(config, "VAD_THRESHOLD", 0.5))
+        self._context = collections.deque(maxlen=self.CONTEXT_FRAMES)
+
+    def is_speech(self, frame):
+        samples = np.frombuffer(frame, dtype=np.int16).astype(np.float32) / 32768.0
+        self._context.append(samples)
+        window = np.concatenate(self._context)
+        # The newest probability: the earlier frames in the window are there to
+        # give this one its history, not to be re-judged.
+        return float(np.asarray(self._model(window)).ravel()[-1]) >= self.threshold
+
+    def reset(self):
+        self._context.clear()
+
+
+def build_detector():
+    """The detector named by ``config.VAD_ENGINE``, or the one that works.
+
+    Falls back to webrtcvad rather than refusing to record: a missing model
+    file or a faster-whisper that moved its internals should cost accuracy,
+    never the meeting.
+    """
+    wanted = str(getattr(config, "VAD_ENGINE", "silero") or "silero").lower()
+    if wanted not in ("silero", "webrtc"):
+        print(f"[audio] unknown VAD_ENGINE {wanted!r}; using silero", flush=True)
+        wanted = "silero"
+    if wanted == "silero":
+        try:
+            return _SileroDetector()
+        except Exception as e:  # noqa: BLE001
+            print(f"[audio] Silero VAD unavailable ({e}); falling back to "
+                  f"webrtcvad, which does not reject music or steady noise.",
+                  flush=True)
+    return _WebRtcDetector()
+
+
 class _Segmenter:
     """Turns a stream of fixed-size frames into utterances.
 
-    Speech has to fill most of a rolling window before capture starts, and the
-    window has to go mostly quiet before it ends — that hysteresis is what stops
-    a cough starting a segment or a mid-sentence breath ending one.
+    Speech has to fill a short window before capture starts, and a longer
+    window has to go quiet before it ends. That hysteresis is what stops a
+    cough starting a segment or a mid-sentence breath ending one.
+
+    **Starting and stopping use different windows, and that matters.** They
+    used to share one, sized for the silence timeout: an utterance began only
+    once 90% of the last 800 ms read as speech. webrtcvad flags speech
+    generously enough for that to fire almost immediately, so it was invisible.
+    Silero is more selective — the property that makes it ignore music — and
+    against the same rule it took long enough to trigger that the rolling
+    window had already discarded the opening words. Whole phrases went missing
+    from the transcript ("Last thing," "I'll update the"), which read as a
+    transcription error and was really a buffering one.
+
+    So onset is judged over its own short window, and every frame is kept in a
+    lead-in buffer regardless, so whenever the trigger fires the audio before
+    it is still there to prepend.
+
+    The frame size comes from the detector, not from a constant: webrtcvad
+    takes 10/20/30 ms frames and Silero takes 512 samples (32 ms), and
+    everything downstream — the capture blocksize, the windows, the minimum
+    utterance — is derived from whichever is in use.
     """
 
     def __init__(self, on_utterance, label):
         self.on_utterance = on_utterance
         self.label = label
-        self.vad = webrtcvad.Vad(config.VAD_AGGRESSIVENESS)
-        self.frame_size = int(config.SAMPLE_RATE * config.FRAME_MS / 1000)
+        self.detector = build_detector()
+        self.frame_size = self.detector.frame_size
         self.bytes_per_frame = self.frame_size * 2  # int16 = 2 bytes/sample
 
-        self._padding = max(1, int(config.SILENCE_TIMEOUT_MS / config.FRAME_MS))
-        self._min_frames = int(config.MIN_UTTERANCE_MS / config.FRAME_MS)
-        self._ring = collections.deque(maxlen=self._padding)
+        frame_ms = self.detector.frame_ms
+        self._padding = max(1, int(config.SILENCE_TIMEOUT_MS / frame_ms))
+        self._min_frames = int(config.MIN_UTTERANCE_MS / frame_ms)
+        onset_ms = getattr(config, "VAD_ONSET_MS", 160)
+        self._onset_frames = max(1, int(onset_ms / frame_ms))
+        self._onset_ratio = float(getattr(config, "VAD_ONSET_RATIO", 0.6))
+
+        # Raw frames kept while idle, so the run-up to a trigger is never lost.
+        # Only as much as the onset can plausibly lag by: this audio is
+        # prepended to every utterance and then transcribed, so a buffer sized
+        # for the silence timeout would staple most of a second of silence to
+        # the front of every line and pay to decode it.
+        lead_frames = max(self._onset_frames,
+                          int(getattr(config, "VAD_LEAD_MS", 300) / frame_ms))
+        self._lead = collections.deque(maxlen=lead_frames)
+        self._onset = collections.deque(maxlen=self._onset_frames)
+        self._release = collections.deque(maxlen=self._padding)
         self._triggered = False
         self._voiced = []
 
@@ -275,25 +411,42 @@ class _Segmenter:
         """Consume one frame of raw 16-bit mono PCM."""
         if len(frame) != self.bytes_per_frame:
             return  # partial block — the VAD only accepts exact frame sizes
-        is_speech = self.vad.is_speech(frame, config.SAMPLE_RATE)
+        is_speech = self.detector.is_speech(frame)
 
         if not self._triggered:
-            self._ring.append((frame, is_speech))
-            if sum(1 for _, s in self._ring if s) > 0.9 * self._ring.maxlen:
+            self._lead.append(frame)
+            self._onset.append(is_speech)
+            if (len(self._onset) == self._onset.maxlen
+                    and sum(self._onset) >= self._onset_ratio * self._onset.maxlen):
                 self._triggered = True
-                self._voiced.extend(f for f, _ in self._ring)
-                self._ring.clear()
+                # Everything still buffered, oldest first: the speaker's first
+                # syllable is in here, several frames before the detector was
+                # willing to call it speech.
+                self._voiced.extend(self._lead)
+                self._lead.clear()
+                self._onset.clear()
+                self._release.clear()
         else:
             self._voiced.append(frame)
-            self._ring.append((frame, is_speech))
-            if sum(1 for _, s in self._ring if not s) > 0.9 * self._ring.maxlen:
+            self._release.append(is_speech)
+            # 90% quiet, not perfectly quiet. Demanding every frame in the
+            # window be silent means one stray flag restarts the whole
+            # timeout, which costs real latency at the end of every sentence
+            # and buys nothing Silero's false-positive rate needs.
+            if (len(self._release) == self._release.maxlen
+                    and sum(self._release) <= 0.1 * self._release.maxlen):
                 self.flush()
 
     def flush(self):
         """Emit whatever has been captured, if it's long enough to be speech."""
         voiced, self._voiced = self._voiced, []
         self._triggered = False
-        self._ring.clear()
+        self._lead.clear()
+        self._onset.clear()
+        self._release.clear()
+        # The next utterance is a new one; its first frames should not be
+        # judged against the tail of the last.
+        self.detector.reset()
         if len(voiced) >= self._min_frames:
             self.on_utterance(b"".join(voiced), self.label)
 

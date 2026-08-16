@@ -34,9 +34,46 @@ LABEL_THEM = "Participants"
 INPUT_DEVICE = None
 
 # --- Voice activity detection (VAD) --------------------------------------
+# WHAT COUNTS AS SOMEBODY TALKING. This decides when an utterance ends, and so
+# when a line can be transcribed at all — it sets the latency floor, and in a
+# noisy room it decides whether the app works.
+#
+#   "silero" — the neural detector faster-whisper already ships (no extra
+#              download, no extra dependency: the ONNX model is in
+#              faster_whisper/assets and onnxruntime is already installed).
+#              It knows what speech sounds like, so music, a fan or a café
+#              stay silent.
+#   "webrtc" — the older heuristic. Cheaper, and it has no model of speech:
+#              measured on the bench fixtures it calls 100% of music and 82%
+#              of café noise "speech", which means an utterance never ends and
+#              nothing is transcribed until you press Stop. Kept as a fallback.
+VAD_ENGINE = "silero"
+
+# How sure Silero has to be, 0-1. Lower hears more and admits more noise.
+# 0.5 measured best on the bench fixtures: it keeps 99-100% of non-speech
+# quiet while catching as much speech as scoring the whole file at once.
+VAD_THRESHOLD = 0.5
+
+# Only used when VAD_ENGINE = "webrtc".
 # 0 = least aggressive (more speech, more false positives)
 # 3 = most aggressive (only clear speech). 2 is a good meeting default.
 VAD_AGGRESSIVENESS = 2
+
+# How much speech it takes to decide somebody has started talking. Judged over
+# its own short window, separate from the silence timeout below: sharing one
+# window makes the start of an utterance depend on how long the *end* of one
+# takes to detect, which silently swallowed the opening words of every line.
+VAD_ONSET_MS = 160
+# ...and how much of that window has to be speech. 0.6 of 160 ms is 3 frames
+# out of 5: fast enough not to clip a first syllable, strict enough that a
+# single stray frame cannot open a segment. Blips shorter than
+# MIN_UTTERANCE_MS are dropped at the other end anyway.
+VAD_ONSET_RATIO = 0.6
+# How much audio from just before the trigger to keep. The detector needs a
+# moment to become sure, and this is what puts the first syllable back. It is
+# prepended to the utterance and transcribed with it, so oversizing it costs
+# decode time on silence.
+VAD_LEAD_MS = 300
 
 # End an utterance after this much continuous silence, then transcribe it.
 SILENCE_TIMEOUT_MS = 800

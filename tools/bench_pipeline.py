@@ -369,7 +369,15 @@ def main():
                     help="feed as fast as possible — decode and endpoint stay "
                          "honest, queue contention does not")
     ap.add_argument("--json", default="", help="write the summary here")
+    ap.add_argument("--vad", default="", choices=["", "silero", "webrtc"],
+                    help="override config.VAD_ENGINE for this run")
+    ap.add_argument("--repeat", type=int, default=1,
+                    help="run each fixture N times and report every run — a "
+                         "laptop under load varies enough to fake a result")
     args = ap.parse_args()
+
+    if args.vad:
+        config.VAD_ENGINE = args.vad
 
     names = (["speech-clean", "speech-cafe", "speech-music", "music-only"]
              if args.all else [args.fixture])
@@ -389,10 +397,12 @@ def main():
     results = []
     for name in names:
         audio, truth = load_fixture(name)
-        run = Run(transcriber, realtime=not args.fast)
-        run.play(audio)
-        results.append(report(name, run, truth,
-                              len(audio) / config.SAMPLE_RATE))
+        for attempt in range(max(1, args.repeat)):
+            label = name if args.repeat < 2 else f"{name} (run {attempt + 1})"
+            run = Run(transcriber, realtime=not args.fast)
+            run.play(audio)
+            results.append(report(label, run, truth,
+                                  len(audio) / config.SAMPLE_RATE))
 
     if args.json:
         payload = {

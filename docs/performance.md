@@ -56,40 +56,77 @@ Measured with `tools/bench_pipeline.py`, which replays a fixture through the
 real segmenter and the real model at real speed. The metric is the one a user
 would describe: **from a turn ending to its words on screen.**
 
-**Baseline — v1.1.1, `base`/int8, `SILENCE_TIMEOUT_MS = 800`, webrtcvad @ 2:**
+**v1.1.1 baseline — webrtcvad @ 2, one shared hysteresis window:**
 
 | Fixture | Wait (median) | Wait (worst) | Segments from 6 turns | WER | CER |
 |---|---|---|---|---|---|
-| `speech-clean` | **1.74 s** | 1.85 s | 8 | 7.2% | 0.3% |
-| `speech-cafe` (10 dB SNR) | **16.6 s** | 30.8 s | **1** | 8.7% | 1.6% |
-| `speech-music` (5 dB SNR) | **16.7 s** | 30.9 s | **1** | 7.2% | 0.3% |
+| `speech-clean` | 1.74 s | 1.85 s | 8 | 7.2% | 0.3% |
+| `speech-cafe` (10 dB SNR) | **16.6 s** | **30.8 s** | **1** | 8.7% | 1.6% |
+| `speech-music` (5 dB SNR) | **16.7 s** | **30.9 s** | **1** | 7.2% | 0.3% |
 | `music-only` | — | — | 1 (no text) | 0 invented words | — |
 
-Read those rows together, because the second and third are the finding.
+The second and third rows are the finding. `webrtcvad` reads steady background
+noise as speech — measured frame by frame it called **100% of music** and 82%
+of café noise speech — so the window never went quiet, the utterance never
+ended, and the whole meeting arrived as **one segment when recording stopped**.
+Not a slow transcript: no transcript until you press Stop, and proportionally
+worse on a real meeting than on a 32-second clip. It is also why those rows
+show a *lower* per-segment decode cost — one long segment is cheaper to decode
+than eight short ones, which flatters every metric except the only one that
+counts.
 
-**In a quiet room** the 1.74 s splits into 860 ms of endpoint delay (the VAD
-waiting out `SILENCE_TIMEOUT_MS` plus its hysteresis) and ~880 ms of decoding.
-Both halves matter; neither dominates.
+Accuracy was never the problem. Whisper handled café noise at 1.6% CER and
+invented nothing over music with no speech under it. The gate in front of it
+was the problem.
 
-**In a noisy room it collapses.** `webrtcvad` reads steady background noise as
-speech, so the ring buffer in `_Segmenter` never goes quiet, the utterance never
-ends, and the entire meeting arrives as **one segment when recording stops** —
-a 30-second wait on a 30-second clip, and proportionally worse on a real
-meeting. This is not a slow transcript; it is no transcript until you press
-Stop. It is also why the café and music rows show a *lower* per-segment decode
-cost: one long segment is cheaper to decode than eight short ones, which
-flatters every metric except the only one that counts.
+**v1.2.0 — Silero VAD, separate onset and release windows:**
 
-Accuracy is not the problem. Whisper handled café noise at 10 dB SNR with a CER
-of 1.6%, and invented nothing at all over music with no speech under it. The
-gate in front of it is the problem.
+| Fixture | Wait (median) | Wait (worst) | Segments from 6 turns | WER | CER |
+|---|---|---|---|---|---|
+| `speech-clean` | **1.68 s** | 1.84 s | 8 | 7.2% | 0.3% |
+| `speech-cafe` (10 dB SNR) | **1.66 s** | 1.73 s | 8 | 7.2% | **0.3%** |
+| `speech-music` (5 dB SNR) | **1.52 s** | 1.62 s | 8 | 7.2% | 0.3% |
+| `music-only` | — | — | 2 (no text) | 0 invented words | — |
+
+A noisy room now behaves like a quiet one — **16.6 s to 1.66 s**, and café CER
+improves from 1.6% to 0.3% because the transcript is no longer one 32-second
+block. Silero also turned out to be *cheaper*: across three runs each it decoded
+at 251–256 ms per second of speech against webrtcvad's 313–512 ms, and its
+worst-case wait was 1.71 s against 27.2 s. The VAD itself costs 0.55 ms per
+32 ms frame, under 2% of the frame it judges.
+
+Two details that are easy to get wrong, both measured:
+
+- **Silero needs context.** Its recurrent state is zeroed on every call, so
+  feeding one frame at a time drops recall from 86% to 67%. It is fed a rolling
+  256 ms window and only the newest probability is used, which restores 99.3%
+  agreement with scoring the whole file at once. Larger windows measured no
+  better.
+- **Onset and release need separate windows.** Sharing one — the original
+  design — meant an utterance could only begin once 90% of the last 800 ms read
+  as speech. webrtcvad is generous enough for that to fire instantly; Silero is
+  selective enough that it fired late, after the rolling buffer had already
+  discarded the opening words. Whole phrases went missing. Onset is now judged
+  over its own 160 ms window with a 300 ms lead-in buffer prepended.
+
+**What was measured and deliberately *not* built:** a spectral music/noise gate
+and a denoise pass, both planned. With Silero in place café CER is already 0.3%
+— identical to clean audio, so there is nothing for denoise to recover — and
+`music-only` already produces zero words. Both would have been code carrying
+risk for a gain the fixtures say does not exist. If a real-world clip ever shows
+otherwise, the bench is how that gets decided.
 
 Regenerate the fixtures and re-measure with:
 
 ```
 python tools/make_fixtures.py
-python tools/bench_pipeline.py --all --json baseline.json
+python tools/bench_pipeline.py --all --repeat 2 --json result.json
+python tools/bench_pipeline.py --fixture speech-cafe --vad webrtc   # compare
 ```
+
+`--repeat` matters: a laptop under load varies enough to fake a result in
+either direction, and the first comparison this work produced was wrong for
+exactly that reason.
 
 ## What makes it light
 

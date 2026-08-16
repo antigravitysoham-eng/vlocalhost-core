@@ -28,6 +28,8 @@ _FILE = "settings.json"
 EDITABLE = (
     "CAPTURE_MODE",
     "INPUT_DEVICE",
+    "VAD_ENGINE",
+    "VAD_THRESHOLD",
     "CALENDAR_PROVIDER",
     "AUTO_START_FROM_CALENDAR",
     "EMAIL_SUMMARY_TO_ATTENDEES",
@@ -136,6 +138,12 @@ def coerce(key: str, raw: str):
             return int(text)
         except ValueError:
             raise ValueError(f"{key} expects a whole number, not {raw!r}") from None
+
+    if isinstance(current, float):
+        try:
+            return float(text)
+        except ValueError:
+            raise ValueError(f"{key} expects a number, not {raw!r}") from None
 
     if text.lower() in _EMPTY:
         return None
