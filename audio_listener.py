@@ -380,8 +380,14 @@ class _Segmenter:
     utterance — is derived from whichever is in use.
     """
 
-    def __init__(self, on_utterance, label):
+    def __init__(self, on_utterance, label, on_partial=None):
         self.on_utterance = on_utterance
+        #: Called with the audio captured *so far*, while somebody is still
+        #: talking, so a UI can show provisional text instead of nothing. Left
+        #: None by the terminal and MCP front ends, which have nowhere to put
+        #: it — and then no partial is ever built or decoded, so they pay
+        #: nothing for a feature they cannot use.
+        self.on_partial = on_partial
         self.label = label
         self.detector = build_detector()
         self.frame_size = self.detector.frame_size
@@ -402,6 +408,9 @@ class _Segmenter:
         lead_frames = max(self._onset_frames,
                           int(getattr(config, "VAD_LEAD_MS", 300) / frame_ms))
         self._lead = collections.deque(maxlen=lead_frames)
+        self._partial_every = max(
+            1, int(getattr(config, "PARTIAL_INTERVAL_MS", 500) / frame_ms))
+        self._since_partial = 0
         self._onset = collections.deque(maxlen=self._onset_frames)
         self._release = collections.deque(maxlen=self._padding)
         self._triggered = False
@@ -426,9 +435,17 @@ class _Segmenter:
                 self._lead.clear()
                 self._onset.clear()
                 self._release.clear()
+                self._since_partial = 0
         else:
             self._voiced.append(frame)
             self._release.append(is_speech)
+            # Provisional text while the speaker is still going. Emitted on a
+            # frame count rather than a clock so it stays tied to the audio,
+            # and only when somebody is listening for it.
+            self._since_partial += 1
+            if self.on_partial and self._since_partial >= self._partial_every:
+                self._since_partial = 0
+                self.on_partial(b"".join(self._voiced), self.label)
             # 90% quiet, not perfectly quiet. Demanding every frame in the
             # window be silent means one stray flag restarts the whole
             # timeout, which costs real latency at the end of every sentence
@@ -444,6 +461,7 @@ class _Segmenter:
         self._lead.clear()
         self._onset.clear()
         self._release.clear()
+        self._since_partial = 0
         # The next utterance is a new one; its first frames should not be
         # judged against the tail of the last.
         self.detector.reset()
@@ -456,13 +474,13 @@ class MicListener:
 
     kind = "microphone"
 
-    def __init__(self, on_utterance, label=None, device=None):
+    def __init__(self, on_utterance, label=None, device=None, on_partial=None):
         """on_utterance(pcm_bytes, label) per detected speech segment."""
         # label="" means single-source capture: nothing to distinguish, so the
         # transcript stays unlabelled.
         self.label = config.LABEL_ME if label is None else label
         self.device = device if device is not None else config.INPUT_DEVICE
-        self._seg = _Segmenter(on_utterance, self.label)
+        self._seg = _Segmenter(on_utterance, self.label, on_partial=on_partial)
         self._q = queue.Queue()
         self._running = False
         self._stream = None
@@ -562,9 +580,9 @@ class LoopbackListener:
 
     kind = "system audio"
 
-    def __init__(self, on_utterance, label=None):
+    def __init__(self, on_utterance, label=None, on_partial=None):
         self.label = config.LABEL_THEM if label is None else label
-        self._seg = _Segmenter(on_utterance, self.label)
+        self._seg = _Segmenter(on_utterance, self.label, on_partial=on_partial)
         self._running = False
         self._worker = None
 
@@ -694,23 +712,26 @@ class MultiListener:
         return [listener.kind for listener in self.listeners]
 
 
-def build_listener(on_utterance):
+def build_listener(on_utterance, on_partial=None):
     """The capture pipeline described by ``config.CAPTURE_MODE``.
 
     ``"mic"``  — your microphone only (the original behaviour).
     ``"both"`` — your microphone *and* the meeting audio from your speakers,
                  each labelled, so the transcript shows who spoke.
+
+    ``on_partial`` is optional and opt-in: pass it and each source will also
+    report the audio captured so far while somebody is still speaking.
     """
     mode = (getattr(config, "CAPTURE_MODE", "mic") or "mic").lower()
     if mode not in ("mic", "both", "system"):
         raise ValueError(
             f"CAPTURE_MODE must be 'mic', 'both', or 'system' — got {mode!r}.")
     if mode == "mic":
-        return MicListener(on_utterance, label="")
+        return MicListener(on_utterance, label="", on_partial=on_partial)
     if mode == "system":
-        return LoopbackListener(on_utterance, label="")
-    return MultiListener([MicListener(on_utterance),
-                          LoopbackListener(on_utterance)])
+        return LoopbackListener(on_utterance, label="", on_partial=on_partial)
+    return MultiListener([MicListener(on_utterance, on_partial=on_partial),
+                          LoopbackListener(on_utterance, on_partial=on_partial)])
 
 
 # Back-compat: earlier code constructed AudioListener directly with a callback

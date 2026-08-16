@@ -116,6 +116,57 @@ and a denoise pass, both planned. With Silero in place café CER is already 0.3%
 risk for a gain the fixtures say does not exist. If a real-world clip ever shows
 otherwise, the bench is how that gets decided.
 
+## Provisional text — what you see while somebody is still talking
+
+A line cannot be transcribed until the speaker stops, so the wait above has a
+floor no amount of tuning removes. What removes the *feeling* of it is showing
+provisional words mid-sentence and replacing them with the real line a moment
+later.
+
+Measured from the instant a speaker **starts** talking, which is when a person
+starts waiting:
+
+| Fixture | Provisional | Finished line | Text arrives sooner by |
+|---|---|---|---|
+| `speech-clean` (3.8 s turns) | **2.11 s** | 5.92 s | **3.8 s** |
+| `speech-cafe` | 1.92 s | 5.90 s | 4.0 s |
+| `speech-music` | 2.14 s | 5.82 s | 3.7 s |
+| `speech-monologue` (33 s turn) | **1.54 s** | 35.63 s | **34.1 s** |
+| `music-only` | none emitted | — | — |
+
+The monologue row is the one that matters. Someone explaining something for
+half a minute used to watch an empty panel for 18 seconds before the first
+finished line appeared. Now words appear at 1.5 s and keep updating.
+
+**The cost, stated plainly:** the finished line lands about **0.4 s later**
+(1.68 s → ~2.1 s after a turn ends), because provisional and final decoding
+share one model and a final cannot interrupt a partial already running. Text
+3.8 s sooner against a final 0.4 s later is a trade worth making, but it is a
+trade.
+
+Two rules keep it from being worse than that, and they are the whole design:
+
+- **Finals always win.** A waiting partial is discarded the moment a finished
+  utterance is queued, and a decoded partial is thrown away if a final landed
+  while it was decoding. Provisional text is decoration; the saved transcript
+  is the product.
+- **Partials wait for themselves.** The next one cannot start until as long has
+  passed as the last one took, capping provisional work at half the model's
+  time. On a slow machine the feature stretches out and eventually stops
+  refreshing rather than starving the transcript.
+
+Front ends with nowhere to display it — the terminal, MCP — never pass an
+``on_partial``, and then no provisional audio is buffered or decoded at all.
+
+**Why provisional text cannot simply be made cheaper:** Whisper pads every
+input to a 30-second mel window, so decode cost is nearly independent of how
+much audio you hand it — measured at **1834 ms for 0.5 s** of audio against
+**1859 ms for 8 s**. Sending shorter partials saves nothing. The only lever is
+a smaller model, which is what `PARTIAL_MODEL` is. Setting it to `"tiny"` buys
+a *smoother* line rather than an earlier one: first words at about the same
+moment, then refreshing every ~1.2 s instead of ~2.4 s (25 updates across the
+monologue against 8), for ~66 MB resident and one more first-run download.
+
 Regenerate the fixtures and re-measure with:
 
 ```

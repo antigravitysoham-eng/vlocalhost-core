@@ -179,6 +179,9 @@ class Run:
         self.finals = []          # dicts, in the order the model produced them
         self.partials = []        # (wall_time, text) if the segmenter supports it
         self._q = queue.Queue()
+        self._partial_slot = None
+        self._partial_lock = threading.Lock()
+        self._next_partial_at = 0.0
         self._running = True
         self._t0 = None
         self._worker = threading.Thread(target=self._decode_loop, daemon=True)
@@ -190,17 +193,54 @@ class Run:
         self._q.put((pcm, label, time.perf_counter()))
 
     def _on_partial(self, pcm, label):
-        self._q.put((pcm, label, time.perf_counter(), True))
+        # A slot, not a queue — the same rule NoteTaker uses, because a bench
+        # that let partials pile up FIFO would measure a backlog the product
+        # cannot have and report a latency nobody will experience.
+        with self._partial_lock:
+            self._partial_slot = (pcm, label, time.perf_counter())
+
+    def _take_partial(self):
+        """NoteTaker's two guards: finals win, and back off by the last cost."""
+        if not self._q.empty():
+            with self._partial_lock:
+                self._partial_slot = None
+            return None
+        if time.perf_counter() < self._next_partial_at:
+            return None
+        with self._partial_lock:
+            item, self._partial_slot = self._partial_slot, None
+        return item
+
+    def _run_partial(self):
+        item = self._take_partial()
+        if item is None:
+            return
+        pcm, label, queued_at = item
+        started = time.perf_counter()
+        try:
+            text = self.transcriber.transcribe(pcm, partial=True)
+        except Exception as e:                            # noqa: BLE001
+            print(f"  [partial decode error] {e}")
+            return
+        done = time.perf_counter()
+        self._next_partial_at = done + (done - started)
+        if text and self._q.empty():
+            self.partials.append({
+                "at": done - self._t0,
+                "audio_to": queued_at - self._t0,
+                "decode_ms": 1000 * (done - started),
+                "text": text,
+            })
 
     # -- the model, on its own thread, exactly as NoteTaker runs it -------
     def _decode_loop(self):
         while self._running or not self._q.empty():
             try:
-                item = self._q.get(timeout=0.1)
+                item = self._q.get(timeout=0.05)
             except queue.Empty:
+                self._run_partial()
                 continue
             pcm, label, flushed_at = item[0], item[1], item[2]
-            is_partial = len(item) > 3
             started = time.perf_counter()
             try:
                 text = self.transcriber.transcribe(pcm)
@@ -208,10 +248,6 @@ class Run:
                 print(f"  [decode error] {e}")
                 continue
             done = time.perf_counter()
-            if is_partial:
-                if text:
-                    self.partials.append({"at": done - self._t0, "text": text})
-                continue
             span = len(pcm) / 2 / config.SAMPLE_RATE
             endpoint = trailing_silence_seconds(pcm)
             self.finals.append({
@@ -334,9 +370,29 @@ def report(name, run, truth, audio_seconds):
                   f"{summary['turn_wait_ms']['worst']}ms")
 
     if run.partials:
-        first = run.partials[0]
-        summary["first_partial_ms"] = round(1000 * first["at"])
-        print(f"  partials  {len(run.partials)}, first at {first['at']:.2f}s")
+        summary["partials"] = len(run.partials)
+        # The question provisional text exists to answer: once you start
+        # talking, how long until anything at all is on screen? Measured from
+        # each turn's *start*, unlike the final-line wait above, which is
+        # measured from its end.
+        firsts = []
+        for turn in utterances:
+            for p in run.partials:
+                if p["audio_to"] >= turn["start_seconds"]:
+                    if p["audio_to"] <= turn["end_seconds"] + 1.0:
+                        firsts.append(p["at"] - turn["start_seconds"])
+                    break
+        if firsts:
+            summary["first_words_ms"] = {
+                "median": round(1000 * statistics.median(firsts)),
+                "worst": round(1000 * max(firsts)),
+            }
+            print(f"  first words {summary['first_words_ms']['median']}ms "
+                  f"median after a speaker starts · worst "
+                  f"{summary['first_words_ms']['worst']}ms "
+                  f"({len(run.partials)} provisional updates)")
+        else:
+            print(f"  partials  {len(run.partials)}, none inside a turn")
     else:
         print("  partials  none (the segmenter emits finals only)")
 
@@ -379,7 +435,8 @@ def main():
     if args.vad:
         config.VAD_ENGINE = args.vad
 
-    names = (["speech-clean", "speech-cafe", "speech-music", "music-only"]
+    names = (["speech-clean", "speech-cafe", "speech-music", "music-only",
+              "speech-monologue"]
              if args.all else [args.fixture])
 
     print(f"model {config.WHISPER_MODEL} · {config.WHISPER_COMPUTE} on "

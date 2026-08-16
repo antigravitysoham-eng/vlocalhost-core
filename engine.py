@@ -136,13 +136,19 @@ def _named(title):
 class AppEngine:
     """Recording session + integrations, shared by every front end."""
 
-    def __init__(self, on_line=None, on_state=None, front_end="app"):
+    def __init__(self, on_line=None, on_state=None, front_end="app",
+                 on_partial=None):
         """on_line(text)  — a newly transcribed line (background thread).
         on_state(status) — called whenever recording starts/stops.
+        on_partial(text, label) — provisional words while somebody is still
+        talking, for a front end that can show and then replace them. Leave it
+        unset (the terminal and MCP do) and no provisional decoding happens at
+        all.
         front_end        — which UI this is, named in the 'already recording'
         message another process sees."""
         self._on_line = on_line or (lambda text: None)
         self._on_state = on_state or (lambda status: None)
+        self._on_partial = on_partial
         self.front_end = front_end
 
         self._provider = None
@@ -162,6 +168,7 @@ class AppEngine:
         """Built on first use — constructing it is cheap, the model loads later."""
         if self._notetaker is None:
             self._notetaker = NoteTaker(on_line=self._on_line,
+                                        on_partial=self._on_partial,
                                         provider=self.provider)
         return self._notetaker
 
@@ -429,7 +436,7 @@ class AppEngine:
         return result
 
 
-def build(on_line=None, on_state=None) -> AppEngine:
+def build(on_line=None, on_state=None, on_partial=None) -> AppEngine:
     """Apply saved user settings, then return a ready engine."""
     settings.apply()
-    return AppEngine(on_line=on_line, on_state=on_state)
+    return AppEngine(on_line=on_line, on_state=on_state, on_partial=on_partial)

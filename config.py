@@ -78,6 +78,34 @@ VAD_LEAD_MS = 300
 # End an utterance after this much continuous silence, then transcribe it.
 SILENCE_TIMEOUT_MS = 800
 
+# How often to show provisional words while somebody is still talking. This is
+# what makes the transcript feel live: the finished line still arrives when the
+# speaker stops, but you stop staring at nothing until then.
+#
+# It is a *floor*, not a promise. Provisional work is skipped whenever a
+# finished utterance is waiting, and the next one never starts until as long
+# has passed as the last one took — so on a slow machine this quietly stretches
+# instead of stealing the model from the transcript that gets saved.
+# Front ends that have nowhere to show it (the terminal, MCP) never ask for it
+# and pay nothing.
+PARTIAL_INTERVAL_MS = 500
+
+# Which model draws the provisional words. None reuses the one above: no extra
+# memory, no extra download.
+#
+# What "tiny" actually buys, measured on a 33-second monologue, is a smoother
+# line rather than an earlier one: the first words appear at about the same
+# moment either way (~1.6 s, set by the interval above plus one decode), but
+# the text then refreshes every ~1.2 s instead of every ~2.4 s — 25 updates
+# across the monologue against 8. It costs ~66 MB resident and one more model
+# to fetch on first run, which is why it is not the default in a product whose
+# promise is that it works offline as soon as it is installed.
+#
+# Making provisional text *shorter* is not a lever: Whisper pads every input to
+# a 30-second window, so half a second of audio costs the same to decode as
+# eight seconds (1834 ms against 1859 ms, measured). Model size is the only one.
+PARTIAL_MODEL = None
+
 # Ignore blips shorter than this (coughs, clicks) to avoid junk transcripts.
 MIN_UTTERANCE_MS = 300
 

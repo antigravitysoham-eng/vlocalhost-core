@@ -86,7 +86,8 @@ class App:
         self._ui_q = queue.Queue()   # work marshalled back onto the Tk thread
         self._busy = False           # a start/stop is in flight
 
-        self.engine = engine_mod.build(on_line=self._line_from_worker)
+        self.engine = engine_mod.build(on_line=self._line_from_worker,
+                                       on_partial=self._interim_from_worker)
 
         root.title("Vlocalhost.AI — Meeting Notes")
         root.geometry("940x660")
@@ -280,6 +281,11 @@ class App:
         scroll.pack(side="right", fill="y")
         self.transcript.configure(yscrollcommand=scroll.set, state="disabled")
         self.transcript.tag_configure("hint", foreground=MUTED)
+        # Provisional text, shown while the sentence is still being spoken and
+        # replaced by the real line a moment later. Dimmed so it reads as "not
+        # final yet" rather than as transcript somebody could quote.
+        self.transcript.tag_configure("interim", foreground=MUTED,
+                                      font=(MONO[0], MONO[1], "italic"))
         self._say("Silence is ignored — lines appear when someone speaks.", "hint")
 
         self.result_label = ttk.Label(parent, text="", style="Muted.TLabel",
@@ -288,13 +294,45 @@ class App:
 
     def _say(self, text, tag=None):
         self.transcript.configure(state="normal")
+        self._drop_interim()          # a real line always replaces the guess
         self.transcript.insert("end", text + "\n", tag or ())
+        self.transcript.see("end")
+        self.transcript.configure(state="disabled")
+
+    def _drop_interim(self):
+        """Remove the provisional line, if one is showing. Caller holds the
+        widget in its editable state."""
+        span = self.transcript.tag_ranges("interim")
+        if span:
+            self.transcript.delete(span[0], span[1])
+
+    def _show_interim(self, text, label=""):
+        """Words the speaker is still saying: dim, and overwritten in place.
+
+        Always the last thing in the widget, because :meth:`_say` deletes it
+        before appending, so the finished line lands where the guess was.
+        """
+        if not self.engine.is_listening:
+            return  # a partial that finished decoding after Stop
+        self.transcript.configure(state="normal")
+        self._drop_interim()
+        who = f"{label}: " if label else ""
+        self.transcript.insert("end", f"  {who}{text}\n", ("interim",))
         self.transcript.see("end")
         self.transcript.configure(state="disabled")
 
     def _line_from_worker(self, line):
         """Called from the transcription thread — hop onto the Tk thread."""
         self._ui_q.put(lambda: self._say(line))
+
+    def _interim_from_worker(self, text, label=""):
+        """Provisional text, from the transcription thread."""
+        self._ui_q.put(lambda: self._show_interim(text, label))
+
+    def _clear_interim(self):
+        self.transcript.configure(state="normal")
+        self._drop_interim()
+        self.transcript.configure(state="disabled")
 
     def _toggle_record(self):
         if self._busy:
@@ -340,6 +378,10 @@ class App:
 
     def _stopped(self, result):
         self._busy = False
+        # Anything still showing as provisional was superseded by the flush
+        # that Stop performed; leaving it would put unfinished words at the
+        # bottom of a transcript the user is about to read as final.
+        self._clear_interim()
         self.record_btn.configure(text="● Start recording", style="Accent.TButton",
                                   state="normal")
         self._set_state("Ready to record", "Saved. Press record to start another.")

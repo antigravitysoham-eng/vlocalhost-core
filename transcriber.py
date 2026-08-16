@@ -69,6 +69,7 @@ class FasterWhisperTranscriber:
 
     def __init__(self):
         self._model = None
+        self._partial_model = None
         self.last_language = None       # ISO code detected for the last utterance
         self.last_language_prob = 0.0   # how sure Whisper was (0-1)
 
@@ -92,22 +93,60 @@ class FasterWhisperTranscriber:
             )
         return self._model
 
+    def load_partial(self):
+        """The model used for provisional text, or the main one.
+
+        Decoding cost with Whisper is close to **constant** regardless of how
+        much audio you hand it — every input is padded to a 30-second mel
+        window, so 0.5 s measured 1834 ms against 8 s at 1859 ms on this
+        machine. Provisional text therefore cannot be made cheap by keeping it
+        short; the only lever is a smaller model.
+
+        ``config.PARTIAL_MODEL = "tiny"`` is that lever. It buys a smoother
+        line rather than an earlier one — first words land at about the same
+        moment, then refresh roughly twice as often — for 66 MB resident and
+        one extra first-run download. Left as None it reuses whatever the main
+        model is, which costs nothing and needs nothing downloaded.
+        """
+        wanted = getattr(config, "PARTIAL_MODEL", None)
+        if not wanted or wanted == config.WHISPER_MODEL:
+            return self.load()
+        if self._partial_model is None:
+            from faster_whisper import WhisperModel
+
+            self._partial_model = WhisperModel(
+                wanted,
+                device=config.WHISPER_DEVICE,
+                compute_type=config.WHISPER_COMPUTE,
+                cpu_threads=getattr(config, "WHISPER_CPU_THREADS", 0),
+            )
+        return self._partial_model
+
     def unload(self):
         """Drop the model and give the memory back — a few hundred MB.
 
         Safe to call any time; the next transcribe() reloads it.
         """
-        if self._model is None:
+        if self._model is None and self._partial_model is None:
             return False
         self._model = None
+        self._partial_model = None
         import gc
 
         gc.collect()
         return True
 
-    def transcribe(self, pcm_bytes):
-        """pcm_bytes: raw 16-bit mono PCM at config.SAMPLE_RATE. Returns text."""
-        model = self.load()
+    def transcribe(self, pcm_bytes, partial=False):
+        """pcm_bytes: raw 16-bit mono PCM at config.SAMPLE_RATE. Returns text.
+
+        ``partial=True`` means this is a provisional read of an utterance still
+        being spoken, headed for a live display and not for the saved
+        transcript. It skips timestamping, which is work nobody will look at,
+        and it does not disturb :attr:`last_language` — a half-finished
+        sentence is a poor sample to label the finished line with, and the
+        final pass is moments away.
+        """
+        model = self.load_partial() if partial else self.load()
         # int16 PCM -> float32 in [-1, 1], which is what whisper expects.
         audio = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
 
@@ -121,9 +160,12 @@ class FasterWhisperTranscriber:
             # only invites the model to invent continuity that isn't there.
             condition_on_previous_text=False,
             no_speech_threshold=0.6,
+            without_timestamps=partial,
         )
-        self.last_language = getattr(info, "language", None)
-        self.last_language_prob = getattr(info, "language_probability", 0.0) or 0.0
+        if not partial:
+            self.last_language = getattr(info, "language", None)
+            self.last_language_prob = (
+                getattr(info, "language_probability", 0.0) or 0.0)
 
         kept = []
         for seg in segments:

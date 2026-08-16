@@ -8,6 +8,7 @@ import os
 import queue
 import re
 import threading
+import time
 from datetime import datetime
 
 import config
@@ -38,17 +39,29 @@ def _unique(path):
 
 
 class NoteTaker:
-    def __init__(self, on_line=None, provider=None):
+    def __init__(self, on_line=None, provider=None, on_partial=None):
         """on_line(text) is called for each newly transcribed line (for live UI).
+        on_partial(text, label) is called with provisional text while somebody
+        is still speaking — pass it only if you have somewhere to show it.
         provider: optional CalendarProvider for naming/email/post-back."""
         self.on_line = on_line or (lambda text: None)
+        self.on_partial = on_partial
         self.provider = provider
 
         self.transcriber = build_transcriber()  # faster-whisper, or your own engine
         # Mic, system audio, or both — see config.CAPTURE_MODE.
-        self.listener = build_listener(self._on_utterance)
+        self.listener = build_listener(
+            self._on_utterance,
+            on_partial=self._on_partial if on_partial else None)
 
         self._utt_q = queue.Queue()
+        # Provisional audio waits in a single slot, not a queue. A newer
+        # partial makes an older one worthless, so the newest simply replaces
+        # whatever was waiting — which also means a slow machine cannot build
+        # a backlog of stale text to grind through.
+        self._partial_slot = None
+        self._partial_lock = threading.Lock()
+        self._next_partial_at = 0.0
         self._transcript = []
         self._lock = threading.Lock()
         self._worker = None
@@ -75,6 +88,10 @@ class NoteTaker:
             return self.transcript_text()
         self.listening = False
         self.listener.stop()          # flushes any in-progress utterance
+        # Whatever was mid-sentence has just been flushed as a real utterance,
+        # so any provisional copy of it is now worse than what is coming.
+        with self._partial_lock:
+            self._partial_slot = None
         if self._worker is not None:
             self._worker.join(timeout=30)  # let the queue drain
             self._worker = None
@@ -85,11 +102,60 @@ class NoteTaker:
         """One detected speech segment, tagged with the source it came from."""
         self._utt_q.put((pcm_bytes, label))
 
+    def _on_partial(self, pcm_bytes, label=None):
+        """Audio for an utterance still in progress. Newest wins."""
+        with self._partial_lock:
+            self._partial_slot = (pcm_bytes, label)
+
+    def _take_partial(self):
+        """The waiting partial, if it is worth spending the model on.
+
+        Two guards. A partial is dropped outright when a finished utterance is
+        queued, because the saved transcript is the product and provisional
+        text is decoration. And the next one is not started until as long has
+        passed as the last one took, so on a machine where a partial costs
+        400 ms the feature settles at half the model's time instead of
+        occupying all of it — the slow-laptop case degrades to today's
+        behaviour rather than to a locked-up one.
+        """
+        if not self._utt_q.empty():
+            with self._partial_lock:
+                self._partial_slot = None
+            return None
+        if time.monotonic() < self._next_partial_at:
+            return None
+        with self._partial_lock:
+            item, self._partial_slot = self._partial_slot, None
+        return item
+
+    def _run_partial(self):
+        """Decode the waiting partial, if there is one worth decoding."""
+        item = self._take_partial()
+        if item is None:
+            return
+        pcm, label = item
+        started = time.monotonic()
+        try:
+            text = self.transcriber.transcribe(pcm, partial=True)
+        except TypeError:
+            # A custom CUSTOM_TRANSCRIBER predating the partial argument. It
+            # still works, it just cannot be asked to hurry.
+            text = self.transcriber.transcribe(pcm)
+        except Exception as e:  # noqa: BLE001 - provisional text is expendable
+            print(f"[partial transcribe error] {e}")
+            return
+        self._next_partial_at = time.monotonic() + (time.monotonic() - started)
+        # A final may have landed while this was decoding, in which case the
+        # real line is already on screen and this is stale.
+        if text and self._utt_q.empty():
+            self.on_partial(text, label or "")
+
     def _transcribe_loop(self):
         while self.listening or not self._utt_q.empty():
             try:
-                pcm, label = self._utt_q.get(timeout=0.2)
+                pcm, label = self._utt_q.get(timeout=0.05)
             except queue.Empty:
+                self._run_partial()
                 continue
             try:
                 text = self.transcriber.transcribe(pcm)

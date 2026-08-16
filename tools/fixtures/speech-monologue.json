@@ -1,0 +1,14 @@
+{
+  "sample_rate": 16000,
+  "duration_seconds": 35.271,
+  "utterances": [
+    {
+      "voice": "David",
+      "text": "So the way the release pipeline works now is that every platform builds on its own runner, because native wheels cannot be cross compiled, and then a separate job collects whatever those runners produced and opens a draft release that a human has to approve before anything reaches a user. The part that bit us last time was that the collection step only looked for zip files, so the installer and the disk image were built correctly and then quietly thrown away, and nobody noticed until somebody tried to download the thing and got a page listing releases with no files attached to them at all.",
+      "start_sample": 16000,
+      "end_sample": 540329,
+      "start_seconds": 1.0,
+      "end_seconds": 33.771
+    }
+  ]
+}

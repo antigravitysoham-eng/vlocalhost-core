@@ -1,0 +1,442 @@
+{
+  "settings": {
+    "whisper_model": "base",
+    "whisper_compute": "int8",
+    "whisper_device": "cpu",
+    "beam_size": 1,
+    "vad_aggressiveness": 2,
+    "silence_timeout_ms": 800,
+    "frame_ms": 30,
+    "realtime": true
+  },
+  "results": [
+    {
+      "fixture": "speech-clean",
+      "audio_seconds": 32.61,
+      "segments": 8,
+      "with_text": 8,
+      "latency_ms": {
+        "first": 1969,
+        "median": 1978,
+        "worst": 2669
+      },
+      "endpoint_ms_median": 776,
+      "decode_ms_per_audio_second": 296,
+      "realtime_factor": 3.4,
+      "turn_wait_ms": {
+        "median": 2148,
+        "worst": 2586
+      },
+      "partials": 9,
+      "first_words_ms": {
+        "median": 2110,
+        "worst": 4264
+      },
+      "wer": 7.2,
+      "cer": 0.3,
+      "utterances": [
+        {
+          "label": "You",
+          "text": "Good morning everyone. Thanks for joining the stand up.",
+          "audio_seconds": 3.968,
+          "audio_from": 0.8341456000860781,
+          "audio_to": 4.802145600086078,
+          "endpoint_ms": 774.125,
+          "queue_ms": 17.107799998484552,
+          "decode_ms": 1177.6048999745399,
+          "latency_ms": 1968.8376999730244,
+          "ready_at": 5.9968583000591025
+        },
+        {
+          "label": "You",
+          "text": "Let's start with the release.",
+          "audio_seconds": 2.304,
+          "audio_from": 5.44151560007967,
+          "audio_to": 7.7455156000796705,
+          "endpoint_ms": 776.9375,
+          "queue_ms": 0.13830000534653664,
+          "decode_ms": 982.5223999796435,
+          "latency_ms": 1759.5981999849898,
+          "ready_at": 8.72817630006466
+        },
+        {
+          "label": "You",
+          "text": "The Windows installer is signed off and ready to ship.",
+          "audio_seconds": 3.488,
+          "audio_from": 7.746498500009068,
+          "audio_to": 11.234498500009067,
+          "endpoint_ms": 832.1875,
+          "queue_ms": 801.1048000771552,
+          "decode_ms": 1035.4458999354392,
+          "latency_ms": 2668.7382000125945,
+          "ready_at": 13.071049200021662
+        },
+        {
+          "label": "You",
+          "text": "I still need two more days for the Mac OS build, mainly the notarization.",
+          "audio_seconds": 5.376,
+          "audio_from": 11.809754999984055,
+          "audio_to": 17.185754999984056,
+          "endpoint_ms": 794.0,
+          "queue_ms": 0.08290004916489124,
+          "decode_ms": 1193.290099967271,
+          "latency_ms": 1987.373000016436,
+          "ready_at": 18.37912800000049
+        },
+        {
+          "label": "You",
+          "text": "Can we move the launch to Thursday the 20th?",
+          "audio_seconds": 3.264,
+          "audio_from": 17.762603500009515,
+          "audio_to": 21.026603500009514,
+          "endpoint_ms": 788.1875,
+          "queue_ms": 567.5642000278458,
+          "decode_ms": 993.2016000384465,
+          "latency_ms": 2348.9533000662927,
+          "ready_at": 22.587369300075807
+        },
+        {
+          "label": "You",
+          "text": "That works for me.",
+          "audio_seconds": 1.824,
+          "audio_from": 21.602330700051038,
+          "audio_to": 23.42633070005104,
+          "endpoint_ms": 764.75,
+          "queue_ms": 117.14819993358105,
+          "decode_ms": 960.9135000500828,
+          "latency_ms": 1842.8116999836639,
+          "ready_at": 24.504392400034703
+        },
+        {
+          "label": "You",
+          "text": "I'll update the calendar and let the team know.",
+          "audio_seconds": 3.136,
+          "audio_from": 23.426205100082793,
+          "audio_to": 26.562205100082792,
+          "endpoint_ms": 775.625,
+          "queue_ms": 795.8484999835491,
+          "decode_ms": 978.449699934572,
+          "latency_ms": 2549.923199918121,
+          "ready_at": 28.336503300000913
+        },
+        {
+          "label": "You",
+          "text": "Last thing, the latency dropped from 2 seconds to under 1.",
+          "audio_seconds": 4.768,
+          "audio_from": 27.105745599994435,
+          "audio_to": 31.873745599994436,
+          "endpoint_ms": 769.75,
+          "queue_ms": 0.0809000339359045,
+          "decode_ms": 992.159100016579,
+          "latency_ms": 1761.9900000505152,
+          "ready_at": 32.86598560004495
+        }
+      ]
+    },
+    {
+      "fixture": "speech-cafe",
+      "audio_seconds": 32.61,
+      "segments": 8,
+      "with_text": 8,
+      "latency_ms": {
+        "first": 989,
+        "median": 1254,
+        "worst": 1847
+      },
+      "endpoint_ms_median": 0,
+      "decode_ms_per_audio_second": 285,
+      "realtime_factor": 3.5,
+      "turn_wait_ms": {
+        "median": 2135,
+        "worst": 2625
+      },
+      "partials": 10,
+      "first_words_ms": {
+        "median": 1918,
+        "worst": 4036
+      },
+      "wer": 7.2,
+      "cer": 0.3,
+      "utterances": [
+        {
+          "label": "You",
+          "text": "Good morning everyone. Thanks for joining the stand up.",
+          "audio_seconds": 4.0,
+          "audio_from": 0.8341022999957204,
+          "audio_to": 4.83410229999572,
+          "endpoint_ms": 0.125,
+          "queue_ms": 0.10000006295740604,
+          "decode_ms": 988.7416999554262,
+          "latency_ms": 988.9667000183836,
+          "ready_at": 5.822944000014104
+        },
+        {
+          "label": "You",
+          "text": "Let's start with the release.",
+          "audio_seconds": 2.304,
+          "audio_from": 5.442101099997759,
+          "audio_to": 7.746101099997759,
+          "endpoint_ms": 0.0,
+          "queue_ms": 0.058699981309473515,
+          "decode_ms": 943.7192999757826,
+          "latency_ms": 943.7779999570921,
+          "ready_at": 8.689879099954851
+        },
+        {
+          "label": "You",
+          "text": "The Windows installer is signed off and ready to ship.",
+          "audio_seconds": 3.456,
+          "audio_from": 7.746845899970271,
+          "audio_to": 11.20284589997027,
+          "endpoint_ms": 0.0,
+          "queue_ms": 378.7649000296369,
+          "decode_ms": 992.3406000016257,
+          "latency_ms": 1371.1055000312626,
+          "ready_at": 12.573951400001533
+        },
+        {
+          "label": "You",
+          "text": "I still need two more days for the Mac OS build, mainly the notarization.",
+          "audio_seconds": 5.376,
+          "audio_from": 11.81099119996745,
+          "audio_to": 17.18699119996745,
+          "endpoint_ms": 0.0,
+          "queue_ms": 306.95590004324913,
+          "decode_ms": 1102.1886999951676,
+          "latency_ms": 1409.1446000384167,
+          "ready_at": 18.596135800005868
+        },
+        {
+          "label": "You",
+          "text": "Can we move the launch to Thursday the 20th?",
+          "audio_seconds": 3.168,
+          "audio_from": 17.794362300022506,
+          "audio_to": 20.962362300022505,
+          "endpoint_ms": 0.0,
+          "queue_ms": 652.8439000248909,
+          "decode_ms": 983.3210000069812,
+          "latency_ms": 1636.164900031872,
+          "ready_at": 22.598527200054377
+        },
+        {
+          "label": "You",
+          "text": "that works for me.",
+          "audio_seconds": 1.792,
+          "audio_from": 21.601256900017148,
+          "audio_to": 23.39325690001715,
+          "endpoint_ms": 0.0625,
+          "queue_ms": 155.31519998330623,
+          "decode_ms": 981.671700021252,
+          "latency_ms": 1137.0494000045583,
+          "ready_at": 24.530243800021708
+        },
+        {
+          "label": "You",
+          "text": "I'll update the calendar and let the team know.",
+          "audio_seconds": 3.168,
+          "audio_from": 23.394370700063185,
+          "audio_to": 26.562370700063184,
+          "endpoint_ms": 0.0,
+          "queue_ms": 864.4196999957785,
+          "decode_ms": 982.9900999320671,
+          "latency_ms": 1847.4097999278456,
+          "ready_at": 28.40978049999103
+        },
+        {
+          "label": "You",
+          "text": "Last thing, the latency dropped from 2 seconds to under 1.",
+          "audio_seconds": 4.768,
+          "audio_from": 27.106417199986055,
+          "audio_to": 31.874417199986055,
+          "endpoint_ms": 0.0,
+          "queue_ms": 0.11220003943890333,
+          "decode_ms": 1007.9341999953613,
+          "latency_ms": 1008.0464000348002,
+          "ready_at": 32.882463600020856
+        }
+      ]
+    },
+    {
+      "fixture": "speech-music",
+      "audio_seconds": 32.61,
+      "segments": 8,
+      "with_text": 8,
+      "latency_ms": {
+        "first": 992,
+        "median": 1165,
+        "worst": 1887
+      },
+      "endpoint_ms_median": 0,
+      "decode_ms_per_audio_second": 285,
+      "realtime_factor": 3.5,
+      "turn_wait_ms": {
+        "median": 2056,
+        "worst": 2666
+      },
+      "partials": 10,
+      "first_words_ms": {
+        "median": 2142,
+        "worst": 3974
+      },
+      "wer": 7.2,
+      "cer": 0.3,
+      "utterances": [
+        {
+          "label": "You",
+          "text": "Good morning everyone. Thanks for joining the stand up.",
+          "audio_seconds": 4.096,
+          "audio_from": 0.8340666000926866,
+          "audio_to": 4.930066600092687,
+          "endpoint_ms": 0.0,
+          "queue_ms": 0.0822999281808734,
+          "decode_ms": 991.4646999677643,
+          "latency_ms": 991.5469998959452,
+          "ready_at": 5.921613599988632
+        },
+        {
+          "label": "You",
+          "text": "Let's start with the release.",
+          "audio_seconds": 2.176,
+          "audio_from": 5.473996099993586,
+          "audio_to": 7.6499960999935865,
+          "endpoint_ms": 0.0,
+          "queue_ms": 0.06580003537237644,
+          "decode_ms": 968.2302000001073,
+          "latency_ms": 968.2960000354797,
+          "ready_at": 8.618292100029066
+        },
+        {
+          "label": "You",
+          "text": "The Windows installer is signed off and ready to ship.",
+          "audio_seconds": 3.584,
+          "audio_from": 7.682376900020987,
+          "audio_to": 11.266376900020987,
+          "endpoint_ms": 0.0,
+          "queue_ms": 259.7153000533581,
+          "decode_ms": 999.9908999307081,
+          "latency_ms": 1259.7061999840662,
+          "ready_at": 12.526083100005053
+        },
+        {
+          "label": "You",
+          "text": "I still need two more days for the Mac OS build, mainly the notarization.",
+          "audio_seconds": 5.216,
+          "audio_from": 11.812142300085164,
+          "audio_to": 17.028142300085165,
+          "endpoint_ms": 0.0,
+          "queue_ms": 424.08009991049767,
+          "decode_ms": 1033.0044000875205,
+          "latency_ms": 1457.0844999980181,
+          "ready_at": 18.485226800083183
+        },
+        {
+          "label": "You",
+          "text": "Can we move the launch to Thursday the 20th?",
+          "audio_seconds": 3.136,
+          "audio_from": 17.794190599989147,
+          "audio_to": 20.930190599989146,
+          "endpoint_ms": 0.0,
+          "queue_ms": 702.0768000511453,
+          "decode_ms": 1008.860299945809,
+          "latency_ms": 1710.9370999969542,
+          "ready_at": 22.6411276999861
+        },
+        {
+          "label": "You",
+          "text": "That works for me.",
+          "audio_seconds": 1.888,
+          "audio_from": 21.60189010008518,
+          "audio_to": 23.489890100085177,
+          "endpoint_ms": 0.1875,
+          "queue_ms": 135.52799995522946,
+          "decode_ms": 933.8168000103906,
+          "latency_ms": 1069.53229996562,
+          "ready_at": 24.559234900050797
+        },
+        {
+          "label": "You",
+          "text": "I'll update the calendar and let the team know.",
+          "audio_seconds": 3.072,
+          "audio_from": 23.491559900037945,
+          "audio_to": 26.563559900037944,
+          "endpoint_ms": 0.0,
+          "queue_ms": 875.5011999746785,
+          "decode_ms": 1011.801499989815,
+          "latency_ms": 1887.3026999644935,
+          "ready_at": 28.450862600002438
+        },
+        {
+          "label": "You",
+          "text": "Last thing, the latency dropped from two seconds to under one.",
+          "audio_seconds": 4.768,
+          "audio_from": 27.10613660006132,
+          "audio_to": 31.87413660006132,
+          "endpoint_ms": 0.3125,
+          "queue_ms": 0.13449997641146183,
+          "decode_ms": 1005.4162000305951,
+          "latency_ms": 1005.8632000070064,
+          "ready_at": 32.879687300068326
+        }
+      ]
+    },
+    {
+      "fixture": "music-only",
+      "audio_seconds": 32.61,
+      "segments": 2,
+      "with_text": 0,
+      "false_words": 0,
+      "utterances": []
+    },
+    {
+      "fixture": "speech-monologue",
+      "audio_seconds": 35.27,
+      "segments": 2,
+      "with_text": 2,
+      "latency_ms": {
+        "first": 3213,
+        "median": 3033,
+        "worst": 3213
+      },
+      "endpoint_ms_median": 763,
+      "decode_ms_per_audio_second": 104,
+      "realtime_factor": 9.6,
+      "turn_wait_ms": {
+        "median": 2831,
+        "worst": 2831
+      },
+      "partials": 9,
+      "first_words_ms": {
+        "median": 1544,
+        "worst": 1544
+      },
+      "wer": 0.0,
+      "cer": 0.0,
+      "utterances": [
+        {
+          "label": "You",
+          "text": "So the way the release pipeline works now is that every platform builds on its own runner, because native wheels cannot be cross-compiled, and then a separate job collects whatever those runners produced and opens a draft release that a human has to approve before anything reaches a user.",
+          "audio_seconds": 16.32,
+          "audio_from": 0.8353679000353438,
+          "audio_to": 17.155367900035344,
+          "endpoint_ms": 778.3125,
+          "queue_ms": 1043.9224999863654,
+          "decode_ms": 1390.3825000161305,
+          "latency_ms": 3212.617500002496,
+          "ready_at": 19.58967290003784
+        },
+        {
+          "label": "You",
+          "text": "The part that bit us last time was that the collection step only looked for zip files, so the installer and the disk image were built correctly and then quietly thrown away, and nobody noticed until somebody tried to download the thing and got a page listing releases with no files attached to them at all.",
+          "audio_seconds": 17.344,
+          "audio_from": 17.15384810002893,
+          "audio_to": 34.49784810002893,
+          "endpoint_ms": 748.625,
+          "queue_ms": 0.15959993470460176,
+          "decode_ms": 2103.7001000950113,
+          "latency_ms": 2852.484700029716,
+          "ready_at": 36.60170780005865
+        }
+      ]
+    }
+  ]
+}

@@ -53,6 +53,24 @@ SCRIPT = [
     ("Zira", "Last thing, the latency dropped from two seconds to under one."),
 ]
 
+# One person talking without pausing, which is where provisional text earns its
+# keep. A meeting made of two-second answers barely needs it — the finished
+# line lands almost as soon as a guess could. Somebody explaining something for
+# twenty seconds is the case where a live transcript is either useful or a
+# blank rectangle.
+MONOLOGUE = [
+    ("David",
+     "So the way the release pipeline works now is that every platform builds "
+     "on its own runner, because native wheels cannot be cross compiled, and "
+     "then a separate job collects whatever those runners produced and opens "
+     "a draft release that a human has to approve before anything reaches a "
+     "user. The part that bit us last time was that the collection step only "
+     "looked for zip files, so the installer and the disk image were built "
+     "correctly and then quietly thrown away, and nobody noticed until "
+     "somebody tried to download the thing and got a page listing releases "
+     "with no files attached to them at all."),
+]
+
 #: Silence between turns. Longer than any endpoint timeout we would consider,
 #: so the segmenter's behaviour is being measured, not the gap's.
 GAP_SECONDS = 1.5
@@ -144,18 +162,18 @@ def trim_silence(audio, threshold=0.01):
     return audio[loud[0]:loud[-1] + 1]
 
 
-def build_speech(workdir):
+def build_speech(workdir, script=SCRIPT, prefix="_turn"):
     """The clean clip plus ground truth: text and exact sample range per turn."""
     jobs, paths = [], []
-    for i, (voice, text) in enumerate(SCRIPT):
-        out = os.path.join(workdir, f"_turn{i}.wav")
+    for i, (voice, text) in enumerate(script):
+        out = os.path.join(workdir, f"{prefix}{i}.wav")
         jobs.append({"voice": voice, "text": text, "out": out})
         paths.append(out)
     _speak(jobs, workdir)
 
     timeline = np.zeros(int(LEAD_SECONDS * SAMPLE_RATE), dtype=np.float32)
     truth = []
-    for (voice, text), path in zip(SCRIPT, paths):
+    for (voice, text), path in zip(script, paths):
         clip = trim_silence(read_wav(path))
         start = len(timeline)
         timeline = np.concatenate([timeline, clip])
@@ -286,6 +304,16 @@ def main():
     # this file is an empty one.
     write_wav(os.path.join(FIXTURES, "music-only.wav"),
               music(len(speech), rng) * 0.5)
+
+    # One uninterrupted turn: the case provisional text exists for.
+    mono, mono_truth = build_speech(FIXTURES, MONOLOGUE, prefix="_mono")
+    write_wav(os.path.join(FIXTURES, "speech-monologue.wav"), mono)
+    with open(os.path.join(FIXTURES, "speech-monologue.json"), "w",
+              encoding="utf-8") as f:
+        json.dump({"sample_rate": SAMPLE_RATE,
+                   "duration_seconds": round(len(mono) / SAMPLE_RATE, 3),
+                   "utterances": mono_truth}, f, indent=2)
+        f.write("\n")
 
     total = len(speech) / SAMPLE_RATE
     print(f"{os.path.relpath(FIXTURES, os.path.dirname(HERE))} — "
