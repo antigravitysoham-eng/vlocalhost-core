@@ -25,9 +25,9 @@ Real-voice clips can be dropped in beside these; the bench reads any WAV.
 """
 
 import argparse
+import glob
 import json
 import os
-import shutil
 import subprocess
 import sys
 import wave
@@ -282,8 +282,16 @@ def main():
         raise SystemExit("Fixture generation uses Windows SAPI. On macOS use "
                          "`say`, or copy the generated fixtures across.")
 
-    shutil.rmtree(FIXTURES, ignore_errors=True)
+    # Clear only what this script produces. The directory also holds recorded
+    # bench results (baseline-*.json, phase*.json), which are the numbers every
+    # later change is scored against -- an rmtree here quietly deleted them
+    # once, which is a bad way to find out that regenerating audio should not
+    # destroy the measurements taken from it.
     os.makedirs(FIXTURES, exist_ok=True)
+    for stale in glob.glob(os.path.join(FIXTURES, "*.wav")):
+        os.remove(stale)
+    for stale in glob.glob(os.path.join(FIXTURES, "speech-*.json")):
+        os.remove(stale)
 
     speech, truth = build_speech(FIXTURES)
     rng = np.random.default_rng(11)
