@@ -1,0 +1,54 @@
+{
+  "sample_rate": 16000,
+  "duration_seconds": 32.611,
+  "utterances": [
+    {
+      "voice": "David",
+      "text": "Good morning everyone, thanks for joining the standup.",
+      "start_sample": 16000,
+      "end_sample": 66108,
+      "start_seconds": 1.0,
+      "end_seconds": 4.132
+    },
+    {
+      "voice": "Zira",
+      "text": "Let's start with the release. The Windows installer is signed off and ready to ship.",
+      "start_sample": 90108,
+      "end_sample": 167759,
+      "start_seconds": 5.632,
+      "end_seconds": 10.485
+    },
+    {
+      "voice": "David",
+      "text": "I still need two more days for the macOS build, mainly the notarisation.",
+      "start_sample": 191759,
+      "end_sample": 262633,
+      "start_seconds": 11.985,
+      "end_seconds": 16.415
+    },
+    {
+      "voice": "Zira",
+      "text": "Can we move the launch to Thursday the twentieth?",
+      "start_sample": 286633,
+      "end_sample": 324103,
+      "start_seconds": 17.915,
+      "end_seconds": 20.256
+    },
+    {
+      "voice": "David",
+      "text": "That works for me. I'll update the calendar and let the team know.",
+      "start_sample": 348103,
+      "end_sample": 412552,
+      "start_seconds": 21.756,
+      "end_seconds": 25.785
+    },
+    {
+      "voice": "Zira",
+      "text": "Last thing, the latency dropped from two seconds to under one.",
+      "start_sample": 436552,
+      "end_sample": 497769,
+      "start_seconds": 27.285,
+      "end_seconds": 31.111
+    }
+  ]
+}

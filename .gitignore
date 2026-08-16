@@ -6,6 +6,12 @@ notes/
 build/
 dist/
 
+# Bench audio: four megabytes of WAV that `tools/make_fixtures.py` regenerates
+# deterministically from the script in that file. The ground truth beside them
+# (*.json) IS committed — it is the reference the numbers are scored against,
+# and it is small.
+tools/fixtures/*.wav
+
 # Python
 __pycache__/
 *.py[cod]
