@@ -18,8 +18,14 @@
 ;      exactly where they are. That folder is deliberately absent from
 ;      [UninstallDelete] — do not "tidy" it in.
 
+; version.py is the single source of the version number, and Inno Setup cannot
+; read it -- so the build passes it in. This used to fall back to a literal
+; when the define was missing, which is a fourth copy of the one fact and the
+; quiet kind of wrong: a hand-compiled installer would announce, register and
+; name itself after whatever version was current when somebody last edited this
+; line. Failing is better than shipping a mislabelled installer.
 #ifndef AppVersion
-  #define AppVersion "1.1.1"
+  #error AppVersion is not defined. Build with:  ISCC.exe /DAppVersion=$(python -c "import version; print(version.__version__)") installer\windows\vlocalhost.iss
 #endif
 
 #define AppName      "Vlocalhost.AI"

@@ -80,14 +80,57 @@ be generic, `git push --no-verify`.
 
 ## Before you open a pull request
 
-- **Run the app.** There is no test suite yet; the bar is that every front end
-  still starts: `python vlocalhost.py`, `--tray`, `--no-tray`, `--mcp`,
-  `--devices`.
+- **Run the app.** The bar is that every front end still starts:
+  `python vlocalhost.py`, `--tray`, `--no-tray`, `--mcp`, `--devices`.
 - **Check it imports clean.** `python -m py_compile *.py integrations/*.py`
+- **Measure anything touching audio, the VAD, or the model.** There is no unit
+  test suite, but there is a bench, and latency claims made without it have
+  been wrong in both directions:
+
+  ```bash
+  python tools/make_fixtures.py                      # once; Windows SAPI voices
+  python tools/bench_pipeline.py --all --repeat 2
+  ```
+
+  Compare against the recorded numbers in [`docs/performance.md`](docs/performance.md).
+  Use `--repeat`: a laptop under load varies enough to fake a result.
 - **Match the surrounding code.** This codebase writes comments that explain
   *why*, uses full sentences in docstrings, and avoids abbreviations. Please
   keep that.
 - **One concern per PR.** A refactor and a feature in the same diff is two PRs.
+
+## Releasing
+
+Versions are [SemVer](https://semver.org/): `MAJOR.MINOR.PATCH`, tagged `vX.Y.Z`.
+A release that adds a feature is a **minor** bump even when the diff is small —
+a patch release that adds a microphone picker misleads everyone reading the
+changelog.
+
+**`version.py` is the only place a human types a version.** The installer
+scripts, the build and the release workflow all read it, and the workflow
+refuses a tag that disagrees with it.
+
+```bash
+# 1. Prove all four platforms build, before creating any tag.
+gh workflow run release.yml -f dry_run=true
+
+# 2. Bump version.py, commit.
+# 3. Tag and push. A release candidate is v1.2.0-rc.1 against version.py
+#    1.2.0 -- the suffix is stripped before the check and marks the draft as a
+#    prerelease, which keeps it out of `releases/latest`.
+git tag v1.2.0 && git push origin v1.2.0
+
+# 4. Review the draft on GitHub, then publish it by hand.
+```
+
+Every release carries, per platform: the installer (`.exe` / `.dmg` /
+`.tar.gz`), a `.zip`, a `.sha256` for each, and a CycloneDX SBOM generated on
+the runner that built that bundle. The install page resolves its download by
+matching `*-windows-x64-setup.exe` and `macos-(arm64|x64).dmg` against
+`releases/latest`, **so a release missing an asset silently breaks the website**
+— v1.0.1 through v1.0.5 shipped with no assets at all and the download button
+just opened the releases page. `draft-release` prints a warning naming any
+platform that did not produce one; read it before publishing.
 
 ## Reporting bugs
 

@@ -10,7 +10,7 @@ Everything now reads this. The build and the release workflow read it too, so
 tagging is the only place a human types a version.
 """
 
-__version__ = "1.1.1"
+__version__ = "1.2.0"
 
 #: Bumped when the on-disk layout changes in a way :mod:`migrate` must handle.
 DATA_LAYOUT = 2
