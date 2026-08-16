@@ -71,20 +71,50 @@ def run_connect(provider_name):
 
 def run_devices():
     """Show what this machine can record, so capture problems are obvious."""
-    from audio_listener import LoopbackListener
+    from audio_listener import (LoopbackListener, device_candidates,
+                                input_devices, rescan_devices)
     import sounddevice as sd
 
-    print("Input devices (microphones)\n" + "-" * 34, flush=True)
-    for index, device in enumerate(sd.query_devices()):
-        if device["max_input_channels"] > 0:
-            print(f"  [{index}] {device['name']}", flush=True)
-    default_in = sd.default.device[0]
-    print(f"\nDefault input: {default_in}", flush=True)
+    rescan_devices()
+
+    # The same list Settings offers. One entry per physical microphone: the
+    # raw list below shows each of them once per Windows audio API, which is
+    # why a machine with one microphone appears to have seven.
+    print("Microphones\n" + "-" * 34, flush=True)
+    offered = input_devices()
+    for device in offered:
+        mark = "  (default)" if device["default"] else ""
+        print(f"  [{device['index']}] {device['name']}{mark}", flush=True)
+    if not offered:
+        print("  none found", flush=True)
+
+    setting = getattr(config, "INPUT_DEVICE", None)
+    if setting in (None, ""):
+        print("\nINPUT_DEVICE is unset — recording follows the system default.",
+              flush=True)
+    else:
+        candidates = device_candidates(setting)
+        where = (f"device {candidates[0]}" if candidates
+                 else "NOTHING CONNECTED — recording will fail")
+        print(f"\nINPUT_DEVICE is {setting!r} -> {where}", flush=True)
 
     ok, reason = LoopbackListener.available()
     print(f"\nSystem audio (the other people on a call): "
           f"{'available' if ok else 'NOT available'}\n  {reason}", flush=True)
     print(f"\nCAPTURE_MODE is {config.CAPTURE_MODE!r}.", flush=True)
+
+    # Everything PortAudio reports, for a support conversation. Kept second
+    # because it answers "what is the driver stack doing", not "which
+    # microphone do I pick".
+    print("\nAll input endpoints, by audio API\n" + "-" * 34, flush=True)
+    try:
+        host_apis = sd.query_hostapis()
+        for index, device in enumerate(sd.query_devices()):
+            if device["max_input_channels"] > 0:
+                api = host_apis[device["hostapi"]]["name"]
+                print(f"  [{index}] {api:22} {device['name']}", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"  could not enumerate: {e}", flush=True)
 
 
 # ---------------------------------------------------------------------------

@@ -651,6 +651,24 @@ class App:
             ttk.Radiobutton(capture, text=text, value=value,
                             variable=self.capture_var,
                             command=self._capture_changed).pack(anchor="w", pady=2)
+        # Which microphone. INPUT_DEVICE has always been settable — from the
+        # command line, and by editing config.py — but never from here, so a
+        # user with two microphones had to change the Windows default or open
+        # a terminal to record from the right one.
+        mic_row = ttk.Frame(capture)
+        mic_row.pack(anchor="w", fill="x", pady=(10, 0))
+        ttk.Label(mic_row, text="Microphone").pack(side="left")
+        self.mic_var = tk.StringVar()
+        self.mic_box = ttk.Combobox(mic_row, textvariable=self.mic_var,
+                                    width=46, state="readonly")
+        self.mic_box.pack(side="left", padx=(10, 6))
+        self.mic_box.bind("<<ComboboxSelected>>", lambda _e: self._mic_changed())
+        ttk.Button(mic_row, text="Refresh", width=9,
+                   command=lambda: self._refresh_mics(rescan=True, announce=True)
+                   ).pack(side="left")
+        self._mic_choices = {}
+        self._refresh_mics()
+
         self.loopback_label = ttk.Label(capture, text="", style="Muted.TLabel",
                                         wraplength=820, justify="left")
         self.loopback_label.pack(anchor="w", pady=(8, 0))
@@ -859,6 +877,60 @@ class App:
         self.status_left.configure(text="Capture source saved — "
                                         "applies to the next recording.")
         self._check_loopback()
+
+    _MIC_DEFAULT = "System default"
+
+    def _refresh_mics(self, rescan=False, announce=False):
+        """Fill the microphone list from the hardware attached right now.
+
+        ``rescan`` makes PortAudio enumerate again, which is the only way a
+        headset connected after the app opened becomes visible.
+        """
+        try:
+            from audio_listener import input_devices
+
+            devices = input_devices(refresh=rescan)
+        except Exception as e:  # noqa: BLE001 - no PortAudio is not a crash
+            self._mic_choices = {self._MIC_DEFAULT: None}
+            self.mic_box.configure(values=[self._MIC_DEFAULT], state="disabled")
+            self.mic_var.set(self._MIC_DEFAULT)
+            print(f"[audio] microphone list unavailable: {e}", flush=True)
+            return
+
+        default_name = next((d["name"] for d in devices if d["default"]), "")
+        label_default = (f"{self._MIC_DEFAULT}  ({default_name})"
+                         if default_name else self._MIC_DEFAULT)
+        # Stored as None, so the setting keeps following the system default
+        # rather than pinning today's default device by name.
+        choices = {label_default: None}
+        for device in devices:
+            choices[device["name"]] = device["name"]
+
+        saved = getattr(config, "INPUT_DEVICE", None)
+        if saved in (None, ""):
+            selected = label_default
+        else:
+            selected = next((label for label, value in choices.items()
+                             if value is not None
+                             and str(value).lower() == str(saved).lower()), None)
+            if selected is None:
+                # Configured but not plugged in. Show it rather than silently
+                # snapping back to the default — the setting is still in force,
+                # and Start will say so plainly.
+                selected = f"{saved}  — not connected"
+                choices[selected] = saved
+
+        self._mic_choices = choices
+        self.mic_box.configure(values=list(choices), state="readonly")
+        self.mic_var.set(selected)
+        if announce and hasattr(self, "status_left"):
+            self.status_left.configure(
+                text=f"Found {len(devices)} microphone(s).")
+
+    def _mic_changed(self):
+        settings.save(INPUT_DEVICE=self._mic_choices.get(self.mic_var.get()))
+        self.status_left.configure(text="Microphone saved — applies to the "
+                                        "next recording.")
 
     def _check_loopback(self):
         """Say plainly whether the far end of a call can be captured here."""

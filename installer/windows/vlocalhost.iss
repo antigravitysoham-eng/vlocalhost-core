@@ -128,10 +128,26 @@ Type: filesandordirs; Name: "{app}\app"
 ; NOTE: %LOCALAPPDATA%\Vlocalhost is NOT listed here, on purpose. See the header.
 
 [Code]
+const
+  // The longest path inside the bundle, measured from {app}. Currently:
+  //   runtime\Lib\site-packages\onnxruntime\tools\ort_format_model\
+  //   ort_flatbuffers_py\fbs\RuntimeOptimizationRecordContainerEntry.py
+  // This is a fact about the payload, not a preference, and it moves when the
+  // dependency list does -- it was 117 before onnxruntime arrived. Re-measure
+  // over build\stage-windows-x64 with os.walk and the longest relpath wins.
+  DeepestInternalPath = 126;
+  // Windows still fails at 260 characters for the APIs Inno Setup's file
+  // copier uses, whatever the registry long-path switch says. 260 - 126 - 1
+  // leaves 133 for the install folder; refusing at 110 keeps 23 characters of
+  // headroom, so the payload can gain a directory level without turning a
+  // path that worked at one release into a rollback at the next.
+  MaxInstallDirLength = 110;
+
 // The directory page accepts anything the user types, including the folder
 // their notes are in (%LOCALAPPDATA%\Vlocalhost, per integrations\store.py).
 // Installing there mixes program files into their data and makes an uninstall
-// look like it ate their meetings. Refuse it.
+// look like it ate their meetings. Refuse that, and refuse a path so deep the
+// payload cannot fit under it.
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
   DataDir, Chosen: String;
@@ -148,6 +164,28 @@ begin
              'Installing the program there would mix it in with your notes. ' +
              'Please choose a different folder.', mbError, MB_OK);
       Result := False;
+      Exit;
+    end;
+
+    // Refuse a folder so deep that the files inside it would exceed the
+    // Windows path limit. Without this the install runs, copies most of the
+    // payload, fails on the first file over the line with "MoveFile failed;
+    // code 3", and rolls the whole thing back -- several minutes spent to
+    // arrive at an error that names an API instead of the cause.
+    if Length(RemoveBackslashUnlessRoot(WizardDirValue)) > MaxInstallDirLength then
+    begin
+      MsgBox('That folder path is too long for Windows.' + #13#10#13#10 +
+             'You chose a path of ' +
+             IntToStr(Length(RemoveBackslashUnlessRoot(WizardDirValue))) +
+             ' characters. Vlocalhost stores files up to ' +
+             IntToStr(DeepestInternalPath) + ' characters deep inside it, and ' +
+             'Windows cannot handle a full path beyond 260 characters.' + #13#10#13#10 +
+             'Please choose a folder no deeper than ' +
+             IntToStr(MaxInstallDirLength) + ' characters. The default, ' +
+             ExpandConstant('{autopf}\Vlocalhost') + ', is well within it.',
+             mbError, MB_OK);
+      Result := False;
+      Exit;
     end;
   end;
 end;

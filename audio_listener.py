@@ -34,6 +34,221 @@ import webrtcvad
 
 import config
 
+# --- Devices --------------------------------------------------------------
+# PortAudio enumerates the sound hardware once, when it initialises, and never
+# looks again. That is invisible until somebody connects a headset after the
+# app is already open: it is simply not there, and the app records from the
+# device that *was* the default at launch, or fails with a message about a
+# missing loopback that sends people hunting for a driver they already have.
+#
+# Re-initialising PortAudio is the only way to make it look again. It is also
+# the one thing that must never happen while a stream is open — every stream
+# handle belongs to the terminated instance — so it is gated on nobody
+# recording.
+
+_open_streams = 0
+_device_lock = threading.Lock()
+
+
+def rescan_devices():
+    """Make PortAudio enumerate the hardware again. True if it did.
+
+    Refuses while any stream is open, because terminating PortAudio underneath
+    a live recording would take the recording with it.
+    """
+    global _open_streams
+    with _device_lock:
+        if _open_streams:
+            return False
+        try:
+            sd._terminate()
+            sd._initialize()
+        except Exception as e:  # noqa: BLE001 - a stale list beats no audio
+            print(f"[audio] could not re-scan devices: {e}", flush=True)
+            return False
+    return True
+
+
+#: Host APIs to offer, best first, per platform. One physical microphone is
+#: exposed once *per API*, so listing them all shows four of everything: this
+#: machine reports its mic array under MME, DirectSound, WASAPI and WDM-KS, and
+#: the MME copy has its name cut to 31 characters mid-word. Picking one API is
+#: what makes the list read like the hardware instead of the driver stack.
+#:
+#: The order is measured, not assumed. WASAPI and WDM-KS are the modern APIs
+#: and the obvious first choice, and both **refuse to open at 16 kHz** — they
+#: hand back the device's native 48 kHz or nothing (PaErrorCode -9997 /
+#: -9996). Whisper and webrtcvad both need 16 kHz mono, so an entry a user
+#: cannot record from is worse than one with an abbreviated name. DirectSound
+#: resamples, and reports full names; MME resamples, and truncates. Hence this
+#: order. Re-measure before changing it:
+#:     python -c "import sounddevice as sd; ..."  (see docs/models.md)
+_PREFERRED_HOST_APIS = {
+    "Windows": ("Windows DirectSound", "MME"),
+    "Darwin": ("Core Audio",),
+    "Linux": ("PulseAudio", "ALSA"),
+}
+
+#: Routing endpoints rather than hardware. They work, but they are named after
+#: the driver plumbing and picking one tells a user nothing about which
+#: microphone they just chose.
+_PSEUDO_DEVICES = ("microsoft sound mapper", "primary sound capture driver",
+                   "sysdefault", "default", "pulse")
+
+
+def input_devices(refresh=False):
+    """Microphones this machine can record from.
+
+    ``[{"index", "name", "default"}]``, the default device first.
+    """
+    if refresh:
+        rescan_devices()
+    try:
+        devices = sd.query_devices()
+        host_apis = sd.query_hostapis()
+    except Exception as e:  # noqa: BLE001 - no audio backend is not a crash
+        print(f"[audio] could not list input devices: {e}", flush=True)
+        return []
+
+    def usable(api_index):
+        return [i for i, d in enumerate(devices)
+                if d.get("hostapi") == api_index
+                and d.get("max_input_channels", 0) >= 1
+                and not (d.get("name") or "").strip().lower().startswith(
+                    _PSEUDO_DEVICES)]
+
+    chosen, indices = None, []
+    for wanted in _PREFERRED_HOST_APIS.get(platform.system(), ()):
+        for api_index, api in enumerate(host_apis):
+            if api.get("name") == wanted and usable(api_index):
+                chosen, indices = api_index, usable(api_index)
+                break
+        if chosen is not None:
+            break
+    if chosen is None:
+        # An API this build has never seen. Fall back to whichever one
+        # PortAudio itself defaults to, then to everything.
+        try:
+            fallback = sd.default.hostapi
+        except Exception:  # noqa: BLE001
+            fallback = None
+        if fallback is not None and usable(fallback):
+            chosen, indices = fallback, usable(fallback)
+        else:
+            indices = [i for i, d in enumerate(devices)
+                       if d.get("max_input_channels", 0) >= 1]
+
+    # The default *for the chosen API*. sd.default.device points into whichever
+    # API PortAudio picked, which is MME on Windows — a different index for the
+    # same microphone, under a truncated name.
+    default_index = None
+    if chosen is not None:
+        default_index = host_apis[chosen].get("default_input_device")
+    if default_index is None or default_index not in indices:
+        default_index = indices[0] if indices else None
+
+    found = [{"index": i, "name": (devices[i].get("name") or "").strip(),
+              "default": i == default_index}
+             for i in indices]
+    found.sort(key=lambda d: (not d["default"], d["name"].lower()))
+    return found
+
+
+def _same_microphone(a, b):
+    """Whether two device names denote the same hardware.
+
+    MME truncates names to 31 characters, so the same microphone is
+    "Microphone Array (AMD Audio Dev" there and "Microphone Array (AMD Audio
+    Device)" under DirectSound. One being a prefix of the other is the
+    reliable signal; the length floor stops two devices sharing a generic
+    first word from being merged.
+    """
+    a, b = a.strip().lower(), b.strip().lower()
+    if a == b:
+        return True
+    shortest = min(len(a), len(b))
+    return shortest >= 8 and (a.startswith(b) or b.startswith(a))
+
+
+def device_candidates(spec):
+    """Every device index that could be ``spec``, best first.
+
+    A picked microphone exists under several host APIs, and only some of them
+    will open at 16 kHz. Returning the alternatives lets a recording start on
+    the MME copy when the DirectSound one will not open, instead of failing at
+    a device the user can plainly see is plugged in.
+    """
+    if spec is None or spec == "":
+        return [None]
+
+    try:
+        devices = sd.query_devices()
+        host_apis = sd.query_hostapis()
+    except Exception:  # noqa: BLE001
+        return [spec]
+
+    order = _PREFERRED_HOST_APIS.get(platform.system(), ())
+
+    def rank(index):
+        name = host_apis[devices[index].get("hostapi")].get("name", "")
+        return order.index(name) if name in order else len(order)
+
+    inputs = [i for i, d in enumerate(devices)
+              if d.get("max_input_channels", 0) >= 1]
+    if isinstance(spec, int) and not isinstance(spec, bool):
+        if spec not in inputs:
+            return []
+        wanted = (devices[spec].get("name") or "").strip()
+        matches = [spec] + [i for i in inputs if i != spec
+                            and _same_microphone(devices[i].get("name") or "",
+                                                 wanted)]
+        return sorted(matches, key=rank)
+
+    needle = str(spec).strip().lower()
+    exact = [i for i in inputs
+             if _same_microphone(devices[i].get("name") or "", needle)]
+    if exact:
+        return sorted(exact, key=rank)
+    loose = [i for i in inputs
+             if needle in (devices[i].get("name") or "").strip().lower()]
+    return sorted(loose, key=rank)
+
+
+def resolve_device(spec, devices=None):
+    """Turn ``config.INPUT_DEVICE`` into an index PortAudio will accept.
+
+    ``None`` means the system default. An int is an index and a string is a
+    name substring — the setting has always accepted both. Names are resolved
+    here rather than handed to PortAudio because a re-scan renumbers the
+    devices: the index that was saved last week may now be somebody else's
+    webcam, whereas the name still identifies the hardware.
+
+    Raises RuntimeError naming what *is* connected when a configured device
+    is not, which is the difference between a user fixing it and filing a bug.
+    """
+    if spec is None or spec == "":
+        return None
+
+    # One matching path, shared with the recording path. Matching on the
+    # curated list instead would reject an index saved by an older build
+    # (`--set INPUT_DEVICE=9`) even when that exact microphone is present under
+    # another host API, which is a working setup broken by an upgrade.
+    candidates = device_candidates(spec)
+    if candidates:
+        return candidates[0]
+
+    found = input_devices() if devices is None else devices
+    # Plain ASCII on purpose: this text reaches a Windows console through
+    # MultiListener.start, and cp1252 cannot encode an arrow or a curly quote.
+    # A UnicodeEncodeError while reporting a missing microphone would replace a
+    # fixable problem with a confusing one.
+    available = ", ".join(d["name"] for d in found) or "none"
+    what = (f"Microphone {spec}" if isinstance(spec, int)
+            else f'The microphone "{spec}"')
+    raise RuntimeError(
+        f"{what} is not connected. Reconnect it, or pick another in "
+        f"Settings, under 'What to listen to'. Available: {available}")
+
 
 class _Segmenter:
     """Turns a stream of fixed-size frames into utterances.
@@ -104,28 +319,72 @@ class MicListener:
         # Runs on a high-priority audio thread — hand off and return fast.
         self._q.put(bytes(indata))
 
+    def _open(self, candidates):
+        """Open the first candidate that will actually take our format.
+
+        The same microphone appears under several host APIs and they do not
+        agree on what they will accept: WASAPI and WDM-KS refuse 16 kHz
+        outright. Trying the alternatives turns "Invalid sample rate" on a
+        device the user can see plugged in into a recording that simply
+        starts.
+        """
+        last = None
+        for device in candidates:
+            try:
+                return sd.RawInputStream(
+                    samplerate=config.SAMPLE_RATE,
+                    blocksize=self._seg.frame_size,
+                    dtype="int16",
+                    channels=config.CHANNELS,
+                    device=device,
+                    callback=self._callback,
+                )
+            except Exception as e:  # noqa: BLE001 - try the next API's copy
+                last = e
+                if device is not None:
+                    print(f"[audio] device {device} would not open at "
+                          f"{config.SAMPLE_RATE} Hz ({e}); trying another",
+                          flush=True)
+        raise last if last is not None else RuntimeError(
+            "No audio input device could be opened.")
+
     def start(self):
+        global _open_streams
         if self._running:
             return
+        # Look at the hardware as it is *now*, not as it was when the app
+        # opened. A headset plugged in during the meeting is the common case,
+        # and before this it was simply invisible.
+        rescan_devices()
+        candidates = device_candidates(self.device)
+        if not candidates:
+            # Nothing on this machine matches. Raise the message that names
+            # what *is* plugged in, rather than a PortAudio error code.
+            resolve_device(self.device)
+
         self._running = True
-        self._stream = sd.RawInputStream(
-            samplerate=config.SAMPLE_RATE,
-            blocksize=self._seg.frame_size,
-            dtype="int16",
-            channels=config.CHANNELS,
-            device=self.device,
-            callback=self._callback,
-        )
-        self._stream.start()
+        try:
+            self._stream = self._open(candidates)
+            self._stream.start()
+        except Exception:
+            # Nothing was opened, so nothing is holding the device list open.
+            self._running = False
+            self._stream = None
+            raise
+        with _device_lock:
+            _open_streams += 1
         self._worker = threading.Thread(target=self._loop, daemon=True)
         self._worker.start()
 
     def stop(self):
+        global _open_streams
         self._running = False
         if self._stream is not None:
             self._stream.stop()
             self._stream.close()
             self._stream = None
+            with _device_lock:
+                _open_streams = max(0, _open_streams - 1)
         if self._worker is not None:
             self._worker.join(timeout=2)
             self._worker = None
