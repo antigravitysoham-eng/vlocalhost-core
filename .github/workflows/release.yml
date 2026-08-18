@@ -90,6 +90,22 @@ jobs:
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
             /DAppVersion=$(python -c "import version; print(version.__version__)") `
             installer\windows\vlocalhost.iss
+          # Hash the installer. build_bundle.py writes a .sha256 beside the zip
+          # and build_macos_app.py beside the dmg, but nothing hashed the .exe
+          # -- it is produced here, by Inno Setup, after both of those have run.
+          # Nobody noticed because every published .exe until now was built by
+          # hand. The result was that the primary Windows download, the one the
+          # install and support pages tell people to verify with Get-FileHash,
+          # was the one asset with no checksum to verify against. On an unsigned
+          # installer that hash is the entire verification story.
+          # Two spaces before the name: the format `cat *.sha256 > SHA256SUMS`
+          # and every other producer already use.
+          Get-ChildItem dist\*-setup.exe | ForEach-Object {
+            $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$h  $($_.Name)" | Out-File -FilePath "$($_.FullName).sha256" `
+              -Encoding ascii -NoNewline
+            Write-Host "sha256 $($_.Name) = $h"
+          }
 
       # notarytool wants the App Store Connect key as a file on disk, so the
       # base64 secret has to be written out before the build can use it. Under
@@ -124,6 +140,11 @@ jobs:
           version=$(python -c "import version; print(version.__version__)")
           tar -C build/stage-linux-x64 -czf \
             "dist/vlocalhost-$version-linux-x64.tar.gz" .
+          # Same omission as the Windows installer: the tarball is produced
+          # here, after the step that writes checksums, so it shipped without
+          # one. sha256sum's own output format is already "<hash>  <name>".
+          ( cd dist && sha256sum "vlocalhost-$version-linux-x64.tar.gz" \
+              > "vlocalhost-$version-linux-x64.tar.gz.sha256" )
           ls -lh dist
 
       # Derived here, on the runner that just built the bundle, because that is
