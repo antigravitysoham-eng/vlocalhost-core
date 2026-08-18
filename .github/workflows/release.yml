@@ -100,10 +100,15 @@ jobs:
           # installer that hash is the entire verification story.
           # Two spaces before the name: the format `cat *.sha256 > SHA256SUMS`
           # and every other producer already use.
+          # WriteAllText with an explicit "`n", not Out-File: Out-File -NoNewline
+          # leaves the file with no line ending at all, and `cat *.sha256` then
+          # welds the next file's hash onto the end of this line, silently
+          # corrupting SHA256SUMS. Out-File without -NoNewline would instead
+          # write CRLF. Every other producer writes "<hash>  <name>\n", so this
+          # writes exactly that.
           Get-ChildItem dist\*-setup.exe | ForEach-Object {
             $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
-            "$h  $($_.Name)" | Out-File -FilePath "$($_.FullName).sha256" `
-              -Encoding ascii -NoNewline
+            [IO.File]::WriteAllText("$($_.FullName).sha256", "$h  $($_.Name)`n")
             Write-Host "sha256 $($_.Name) = $h"
           }
 
@@ -203,7 +208,17 @@ jobs:
             -o -name '*.dmg' -o -name '*.tar.gz' -o -name '*.sha256' \
             -o -name '*.cyclonedx.json' \) \
             -exec cp {} dist/ \;
-          cat dist/*.sha256 > dist/SHA256SUMS
+          # Newline-safe on purpose. A plain `cat` assumes every producer ended
+          # its file with one, and the first that did not silently joined two
+          # entries into an unverifiable line. Normalising here means a future
+          # producer getting it wrong costs nothing, and strips the stray blank
+          # lines that adds.
+          for f in dist/*.sha256; do
+            [ -s "$f" ] || continue
+            awk 'NF { print }' "$f"
+          done > dist/SHA256SUMS
+          echo "SHA256SUMS covers $(wc -l < dist/SHA256SUMS) file(s):"
+          cat dist/SHA256SUMS
           ls -lh dist
 
       - name: Check the platforms
