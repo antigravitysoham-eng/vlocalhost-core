@@ -1,10 +1,19 @@
 sounddevice>=0.4.6
+# The fallback voice detector. Still here on purpose: if the Silero model will
+# not load, recording continues on this rather than failing.
 webrtcvad-wheels>=2.0.14
 # Captures the other people on a video call from your system audio
 # (WASAPI loopback on Windows, PulseAudio monitor on Linux). Needed for
 # CAPTURE_MODE = "both" / "system"; the mic works without it.
 soundcard>=0.4.3
-faster-whisper>=1.0.0
+# 1.2.1 is a real floor, not caution. The voice detector loads
+# `silero_vad_v6.onnx` from this package's own assets, and that file first
+# shipped in 1.2.1. Resolve anything older and the Silero path fails its
+# import, the app quietly falls back to webrtcvad, and the thing that makes a
+# noisy room usable is silently absent -- the transcript stops appearing until
+# you press Stop, with nothing to say why. onnxruntime comes with it
+# (faster-whisper requires >=1.14), so the runtime needs no line of its own.
+faster-whisper>=1.2.1
 numpy>=1.24
 requests>=2.31
 pystray>=0.19
