@@ -321,6 +321,47 @@ TOOLS = [
     },
 ]
 
+def _action_tools():
+    """One MCP tool per registered action.
+
+    Core does not know what these are. An extension registers an action (see
+    :mod:`actions`) and it appears here automatically, so a paid capability
+    reaches Claude Desktop, Claude Code and Cursor without this file naming it
+    — and a Core install adds nothing, because the registry is empty.
+
+    The meeting is chosen the same way the CLI chooses it: by file name, or the
+    most recent recording when the client does not say. A model asking "draft
+    the follow-up from my last meeting" should not have to look the name up
+    first.
+    """
+    import actions as actions_mod
+
+    tools = []
+    for action in actions_mod.available_actions():
+        def run(note=None, _action=action):
+            from _actions_cli import _load
+
+            return _action.run(_load(note or ""))
+
+        tools.append({
+            "name": action.name,
+            "description": action.description or action.label,
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "note": {"type": "string",
+                             "description": "File name of a saved meeting, "
+                                            "e.g. 2026-08-19_standup.txt. "
+                                            "Omit for the most recent one."},
+                },
+            },
+            "handler": run,
+        })
+    return tools
+
+
+TOOLS += _action_tools()
+
 _BY_NAME = {t["name"]: t for t in TOOLS}
 
 
