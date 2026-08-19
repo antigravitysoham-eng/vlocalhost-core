@@ -16,6 +16,8 @@ different front end.
     python vlocalhost.py --get                # list every setting you can change
     python vlocalhost.py --set OLLAMA_MODEL=mistral   # change one (or several)
     python vlocalhost.py --paths              # where notes, settings and models live
+    python vlocalhost.py --actions            # what can be done with a saved meeting
+    python vlocalhost.py --do <action>        # run one against the newest meeting
 
 Recording, transcription, summaries and notes on disk need no account and no
 network. If a calendar provider is installed, connecting one additionally lets
@@ -333,6 +335,18 @@ def main(argv):
     if "--paths" in argv:
         return run_paths()
 
+    # What can be done with a saved meeting. Core does not know what these are
+    # -- it prints whatever registered, which on a Core install is nothing.
+    if "--actions" in argv:
+        from _actions_cli import run_actions
+
+        return run_actions()
+
+    if "--do" in argv:
+        from _actions_cli import run_do
+
+        return run_do(argv)
+
     if "--setup" in argv:
         import setup_wizard
 
@@ -343,7 +357,8 @@ def main(argv):
     # before the app opens. Skipped for the tray, the terminal and MCP, which
     # are either headless or driven by something that can't answer.
     if not any(f in argv for f in ("--tray", "--no-tray", "--mcp",
-                                   "--devices", "--connect")):
+                                   "--devices", "--connect", "--actions",
+                                   "--do")):
         import setup_wizard
 
         if setup_wizard.needed():
