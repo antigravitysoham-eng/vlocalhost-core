@@ -30,12 +30,18 @@ def _load(name: str = ""):
     if name:
         item = next((i for i in app.list_notes(limit=0) if i["name"] == name), None)
         if item is None:
-            raise SystemExit(f"No saved meeting called {name!r}. "
-                             f"Run --actions to see what is available.")
+            # LookupError, not SystemExit. This function is called by the MCP
+            # server as well as the CLI, and SystemExit inherits from
+            # BaseException -- so the server's `except Exception` let it
+            # through and the whole process died when a client asked for a
+            # meeting that did not exist. A wrong file name should be an error
+            # message, not a dropped connection.
+            raise LookupError(f"No saved meeting called {name!r}. "
+                              f"Run --actions to see what is available.")
     else:
         item = _newest_transcript()
         if item is None:
-            raise SystemExit("No saved meetings yet — record one first.")
+            raise LookupError("No saved meetings yet — record one first.")
 
     transcript = app.read_note(item["name"])
     title = os.path.splitext(item["name"])[0]
@@ -90,7 +96,11 @@ def run_do(argv) -> int:
               file=sys.stderr, flush=True)
         return 1
 
-    meeting = _load(meeting_file)
+    try:
+        meeting = _load(meeting_file)
+    except LookupError as e:
+        print(e, file=sys.stderr, flush=True)
+        return 1
     print(f"[{action.label}] {meeting.title}", file=sys.stderr, flush=True)
     # The result goes to stdout and the labels to stderr, so the useful part
     # can be piped straight to the clipboard:  ... --do copy_for_assistant | clip
