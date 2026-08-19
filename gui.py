@@ -288,6 +288,14 @@ class App:
                                       font=(MONO[0], MONO[1], "italic"))
         self._say("Silence is ignored — lines appear when someone speaks.", "hint")
 
+        # What to do with the meeting once it is saved. Empty on a Core
+        # install: the row builds itself from whatever registered, and nothing
+        # here knows what any of it is.
+        self.next_row = ttk.Frame(parent)
+        self.next_row.pack(anchor="w", pady=(10, 0), fill="x")
+        self.next_label = ttk.Label(self.next_row, text="", style="Muted.TLabel",
+                                    wraplength=820, justify="left")
+
         self.result_label = ttk.Label(parent, text="", style="Muted.TLabel",
                                       wraplength=820, justify="left")
         self.result_label.pack(anchor="w", pady=(10, 0))
@@ -400,6 +408,79 @@ class App:
             parts.append(f"summary failed: {result['error']}")
         self.result_label.configure(text="  ·  ".join(parts), style="Muted.TLabel")
         self._say("— saved —", "hint")
+        self._offer_next(result)
+
+    # -- what to do with the meeting next ------------------------------------
+    def _offer_next(self, result):
+        """Show a button per registered action. Nothing registered, nothing shown."""
+        for child in self.next_row.winfo_children():
+            child.pack_forget()
+
+        try:
+            import actions as actions_mod
+
+            meeting = actions_mod.Meeting(
+                title=result.get("title") or "",
+                transcript=self.engine.transcript(),
+                notes=result.get("notes"),
+                transcript_path=result.get("transcript") or "",
+                notes_path=result.get("summary") or "")
+            available = actions_mod.available_actions(meeting)
+        except Exception as e:  # noqa: BLE001 - an extension must never break saving
+            print(f"[actions] unavailable: {e}", flush=True)
+            return
+        if not available:
+            return
+
+        self._next_meeting = meeting
+        ttk.Label(self.next_row, text="Next:", style="Muted.TLabel").pack(
+            side="left", padx=(0, 8))
+        for action in available:
+            ttk.Button(self.next_row, text=action.label,
+                       command=lambda a=action: self._run_next(a)).pack(
+                side="left", padx=(0, 6))
+        self.next_label.pack(side="left", padx=(10, 0))
+        self.next_label.configure(text="")
+
+    def _run_next(self, action):
+        """Run one action off the Tk thread and put the result on the clipboard.
+
+        Extraction takes seconds, not milliseconds -- it is a local model call --
+        so doing this inline would freeze the window mid-click and look like a
+        crash. The button says what is happening instead.
+        """
+        self.next_label.configure(text=f"{action.label}…", style="Muted.TLabel")
+
+        def work():
+            try:
+                output = action.run(self._next_meeting)
+            except Exception as e:  # noqa: BLE001
+                self._ui_q.put(lambda err=e: self.next_label.configure(
+                    text=f"{action.label} failed: {err}", style="Bad.TLabel"))
+                return
+            self._ui_q.put(lambda text=output: self._next_ready(action, text))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _next_ready(self, action, output):
+        """Copy the result, and say what just went onto the clipboard.
+
+        The count is deliberate. Pasting into an assistant that is not on this
+        machine is an upload, and the honest thing is to say what is in it
+        before the user pastes rather than in a settings page they will not
+        read.
+        """
+        if not isinstance(output, str) or not output.strip():
+            self.next_label.configure(text="Nothing to copy — the meeting had "
+                                           "no decisions or actions in it.",
+                                      style="Muted.TLabel")
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(output)
+        words = len(output.split())
+        self.next_label.configure(
+            text=f"Copied — {words} words, ready to paste. Nothing was sent.",
+            style="Good.TLabel")
 
     def _set_state(self, state, detail=None):
         self.state_label.configure(text=state)
