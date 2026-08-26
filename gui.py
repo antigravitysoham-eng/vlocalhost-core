@@ -20,6 +20,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import config
 import engine as engine_mod
+import updates
 import languages
 import performance
 import settings
@@ -110,6 +111,7 @@ class App:
         self._statusbar()
 
         self.root.after(80, self._pump)
+        self.root.after(1200, self._update_nudge)
         self.root.after(1000, self._tick)
         self._refresh_connections()
         self._check_loopback()
@@ -170,11 +172,24 @@ class App:
     def _header(self):
         bar = ttk.Frame(self.root, style="Ink.TFrame", padding=(20, 14, 20, 6))
         bar.pack(fill="x")
-        mark = tk.Canvas(bar, width=34, height=34, bg=INK, highlightthickness=0)
-        # The brand mark, drawn small: amber tile holding a dark waveform.
-        mark.create_rectangle(2, 2, 32, 32, fill=AMBER, outline="")
-        for x, h in ((9, 6), (14, 11), (19, 8), (24, 4)):
-            mark.create_rectangle(x, 17 - h, x + 3, 17 + h, fill=INK, outline="")
+        # The real mark, from the same asset the taskbar and the tray use, so the
+        # three cannot drift apart again. The hand-drawn version below is only a
+        # fallback for a build with no assets folder -- it approximates the tile
+        # and the bars, and it is deliberately not a second source of truth.
+        mark = None
+        try:
+            from PIL import Image, ImageTk
+
+            here = os.path.dirname(os.path.abspath(__file__))
+            img = Image.open(os.path.join(here, "assets", "vlocalhost.png"))
+            img = img.convert("RGBA").resize((34, 34), Image.LANCZOS)
+            self._mark_img = ImageTk.PhotoImage(img)   # keep a ref or Tk drops it
+            mark = tk.Label(bar, image=self._mark_img, bg=INK, bd=0)
+        except Exception:  # noqa: BLE001 - never fail to draw a window over an icon
+            mark = tk.Canvas(bar, width=34, height=34, bg=INK, highlightthickness=0)
+            mark.create_rectangle(2, 2, 32, 32, fill=AMBER, outline="")
+            for x, h in ((9, 6), (14, 11), (19, 8), (24, 4)):
+                mark.create_rectangle(x, 17 - h, x + 3, 17 + h, fill=INK, outline="")
         mark.pack(side="left", padx=(0, 12))
 
         name = ttk.Frame(bar, style="Ink.TFrame")
@@ -186,6 +201,21 @@ class App:
 
         self.badge = tk.Label(bar, text="● on-device", bg=INK, fg=CYAN, font=MONO)
         self.badge.pack(side="right")
+
+        # Version and the update check live in the header because that is where
+        # someone looks when they are asking "what am I running?". Nothing here
+        # contacts anything until the button is pressed -- see updates.py.
+        box = ttk.Frame(bar, style="Ink.TFrame")
+        box.pack(side="right", padx=(0, 18))
+        self.ver_line = tk.Label(box, text=f"v{updates.current()}", bg=INK,
+                                 fg=MUTED, font=MONO)
+        self.ver_line.pack(anchor="e")
+        self.check_btn = tk.Button(
+            box, text="Check for updates", command=self._check_updates,
+            bg=INK, fg=AMBER, activebackground=INK, activeforeground=AMBER_DEEP,
+            relief="flat", bd=0, cursor="hand2", font=(MONO[0], 9, "underline"),
+            highlightthickness=0, padx=0, pady=0)
+        self.check_btn.pack(anchor="e")
 
     def _tabs(self):
         nb = ttk.Notebook(self.root)
@@ -237,6 +267,61 @@ class App:
         self.status_right = ttk.Label(bar, text="", style="MutedInk.TLabel",
                                       font=MONO)
         self.status_right.pack(side="right")
+
+    # -- Updates -------------------------------------------------------------
+
+    def _update_nudge(self):
+        """If the local reminder is due, say so quietly. Sends nothing.
+
+        A label change, never a modal. Interrupting somebody with a dialog they
+        did not ask for -- to tell them to go and ask a question -- would be a
+        worse thing to do than the problem it solves.
+        """
+        try:
+            if updates.due_for_reminder():
+                self.ver_line.config(text=f"v{updates.current()} · check due",
+                                     fg=AMBER)
+                updates.mark_reminded()
+        except Exception:  # noqa: BLE001 - a nudge must never break startup
+            pass
+
+    def _check_updates(self):
+        """The one place in the app that reaches the network, on a click."""
+        self.check_btn.config(state="disabled", text="Checking…")
+
+        def worker():
+            try:
+                result = updates.check_now()
+            except updates.CheckFailed:
+                self.root.after(0, self._update_done, None)
+            except Exception:  # noqa: BLE001
+                self.root.after(0, self._update_done, None)
+            else:
+                self.root.after(0, self._update_done, result)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _update_done(self, result):
+        self.check_btn.config(state="normal", text="Check for updates")
+        if result is None:
+            # Offline is not an error. Same rule as the calendar integration.
+            self.ver_line.config(text=f"v{updates.current()} · offline", fg=MUTED)
+            return
+        if not result["update"]:
+            self.ver_line.config(text=f"v{updates.current()} · up to date",
+                                 fg=CYAN)
+            return
+        self.ver_line.config(text=f"v{updates.current()} → {result['latest']}",
+                             fg=AMBER)
+        nl = chr(10)
+        if messagebox.askyesno(
+                "Update available",
+                f"You are running {result['current']}.{nl}"
+                f"{result['latest']} is available.{nl}{nl}"
+                "Open the release page to download it?"):
+            import webbrowser
+
+            webbrowser.open(result["url"])
 
     # -- Record tab ----------------------------------------------------------
     def _build_record(self, parent):

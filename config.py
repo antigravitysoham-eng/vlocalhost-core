@@ -210,3 +210,25 @@ EMAIL_SUMMARY_TO_SELF = True
 
 # After a meeting is saved, write the notes back into the calendar event.
 POST_NOTES_TO_EVENT = False
+
+
+# --- Updates -------------------------------------------------------------
+# Nothing here runs on a schedule and nothing here contacts anything on its
+# own. `updates.py` holds the whole of it, and the only outbound call in the
+# module is reached from a button a human pressed.
+#
+# How many days may pass before the app reminds you to check. The reminder is
+# purely local -- it compares the system clock against a stored date and sends
+# nothing at all. Set to 0 to switch it off; that choice is honoured forever.
+#
+# Seven days rather than monthly on purpose: the published security policy
+# commits to a 72-hour fix for anything that could put meeting content off the
+# machine, and a monthly nudge cannot deliver a 72-hour promise.
+UPDATE_REMINDER_DAYS = 7
+
+# Where "Check for updates" looks, and where the button sends you. Public,
+# unauthenticated, and the same page a browser would open.
+UPDATE_API_URL = ("https://api.github.com/repos/"
+                  "antigravitysoham-eng/vlocalhost-core/releases/latest")
+UPDATE_RELEASES_URL = ("https://github.com/"
+                       "antigravitysoham-eng/vlocalhost-core/releases/latest")

@@ -56,6 +56,8 @@ EDITABLE = (
     # privileged than config.py was — same user, same machine — but it is
     # worth being explicit about.
     "CUSTOM_TRANSCRIBER",
+    # How often the local, network-free update reminder fires. 0 turns it off.
+    "UPDATE_REMINDER_DAYS",
 )
 
 

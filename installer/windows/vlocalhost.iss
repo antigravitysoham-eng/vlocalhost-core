@@ -59,6 +59,17 @@ PrivilegesRequiredOverridesAllowed=dialog
 DefaultDirName={autopf}\Vlocalhost
 DisableDirPage=no
 UsePreviousAppDir=yes
+
+; Upgrading over a running copy used to hit locked files, and Inno's fallback
+; for that is a reboot prompt -- on a tray app, which is running essentially
+; always. CloseApplications lets Setup close it first and RestartApplications
+; puts it back afterwards, so an upgrade is a progress bar rather than a
+; reboot. AppMutex is how Setup detects the running copy; core/singleton.py
+; creates a mutex of exactly this name, and the two must be changed together.
+AppMutex=Vlocalhost.AI.Running
+CloseApplications=yes
+CloseApplicationsFilter=vlocalhost.exe,*.exe
+RestartApplications=yes
 DefaultGroupName={#AppName}
 AllowNoIcons=yes
 

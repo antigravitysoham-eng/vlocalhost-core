@@ -168,14 +168,31 @@ def run_tray():
     eng.front_end = "tray"
 
     def make_icon(active):
-        img = Image.new("RGB", (64, 64), (30, 30, 30))
-        d = ImageDraw.Draw(img)
-        # A little mic: red dot = listening, grey = idle.
-        color = (220, 60, 60) if active else (140, 140, 140)
-        d.rounded_rectangle([26, 12, 38, 40], radius=6, fill=color)
-        d.arc([20, 28, 44, 50], start=0, end=180, fill=color, width=3)
-        d.line([32, 50, 32, 56], fill=color, width=3)
-        d.line([24, 56, 40, 56], fill=color, width=3)
+        """The Sunbeam mark, with a recording dot when listening.
+
+        This used to draw a generic grey microphone, which meant the icon a user
+        sees most often -- it sits in the tray all day -- was the one place the
+        brand never reached. Loading the real asset also means the tray follows
+        the brand automatically the next time the icon is regenerated.
+        """
+        here = os.path.dirname(os.path.abspath(__file__))
+        try:
+            img = Image.open(os.path.join(here, "assets", "vlocalhost.png"))
+            img = img.convert("RGBA").resize((64, 64), Image.LANCZOS)
+        except Exception:  # noqa: BLE001 - a missing asset must not kill the tray
+            img = Image.new("RGBA", (64, 64), (30, 30, 30, 255))
+            d = ImageDraw.Draw(img)
+            color = (220, 60, 60) if active else (140, 140, 140)
+            d.rounded_rectangle([26, 12, 38, 40], radius=6, fill=color)
+            d.arc([20, 28, 44, 50], start=0, end=180, fill=color, width=3)
+            d.line([32, 50, 32, 56], fill=color, width=3)
+            d.line([24, 56, 40, 56], fill=color, width=3)
+            return img
+        if active:
+            # A red dot, bottom-right, ringed so it reads on any wallpaper.
+            d = ImageDraw.Draw(img)
+            d.ellipse([40, 40, 62, 62], fill=(255, 255, 255, 255))
+            d.ellipse([43, 43, 59, 59], fill=(220, 60, 60, 255))
         return img
 
     icon = pystray.Icon("vlocalhost", make_icon(False), "Vlocalhost.AI")
@@ -310,9 +327,43 @@ def run_paths():
 
 
 # ---------------------------------------------------------------------------
+def run_check_updates():
+    """`--check-updates`: the CLI half of the button. One GET, then it stops.
+
+    This is the only path in the application that contacts anything other than
+    a local model, and it exists only because a human typed it.
+    """
+    import updates
+
+    print(f"Installed: {updates.current()}")
+    try:
+        result = updates.check_now()
+    except updates.CheckFailed as exc:
+        # Offline is not an error worth a non-zero exit. Nothing is broken; the
+        # question simply could not be answered right now.
+        print(f"Could not reach the release list ({exc}).")
+        print(f"Check by hand: {config.UPDATE_RELEASES_URL}")
+        return 0
+    if result["update"]:
+        print(f"Available: {result['latest']}  <- update")
+        print(f"Download:  {result['url']}")
+    else:
+        print(f"Available: {result['latest']}  (up to date)")
+    return 0
+
+
 def main(argv):
     import diagnostics
     import migrate
+
+    # Held for the process lifetime so the Windows installer can see that a copy
+    # is running and close it cleanly instead of demanding a reboot.
+    try:
+        import singleton
+
+        singleton.hold()
+    except Exception:  # noqa: BLE001 - never a reason to fail to start
+        pass
 
     diagnostics.setup()
     settings.apply()
@@ -334,6 +385,15 @@ def main(argv):
 
     if "--paths" in argv:
         return run_paths()
+
+    if "--check-updates" in argv:
+        return run_check_updates()
+
+    if "--version" in argv:
+        import updates
+
+        print(updates.describe())
+        return 0
 
     # What can be done with a saved meeting. Core does not know what these are
     # -- it prints whatever registered, which on a Core install is nothing.
