@@ -82,6 +82,7 @@ the transcript below. Use 3 to 6 words. Respond with ONLY the title text — no 
 quotes, no "Title:" label, no trailing punctuation, no explanation. \
 Write the title in English even if the transcript is in another language, and \
 use only plain ASCII letters — the title becomes a file name.
+Name what the meeting was ABOUT. Never use the words "transcript", "recording", "notes", "summary" or "audio" — those describe the file, not the conversation, and they end up duplicated in the file name.
 
 TRANSCRIPT:
 {transcript}

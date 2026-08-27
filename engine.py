@@ -376,7 +376,13 @@ class AppEngine:
             items.append({
                 "name": name,
                 "path": path,
-                "kind": "notes" if name.endswith("-notes.md") else "transcript",
+                # "-notes.md" is the pre-1.2.0 name for a summary. Files
+                # already on disk keep working -- renaming the output is
+                # not a reason to stop recognising what a user saved last
+                # month.
+                "kind": ("notes"
+                         if name.endswith(("-summary.md", "-notes.md"))
+                         else "transcript"),
                 "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(
                     timespec="seconds"),
                 "bytes": stat.st_size,

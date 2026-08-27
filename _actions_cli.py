@@ -45,13 +45,20 @@ def _load(name: str = ""):
 
     transcript = app.read_note(item["name"])
     title = os.path.splitext(item["name"])[0]
-    # The summary sits beside the transcript under the same base name.
+    # The summary sits beside the transcript. Try the current name first,
+    # then the pre-1.2.0 one, so meetings saved by an older build still
+    # resolve. The transcript may itself carry the "-transcript" suffix
+    # now, which has to come off before either summary name is built.
     notes = None
-    notes_name = os.path.splitext(item["name"])[0] + "-notes.md"
-    try:
-        notes = app.read_note(notes_name)
-    except (FileNotFoundError, ValueError):
-        pass
+    stem = os.path.splitext(item["name"])[0]
+    if stem.endswith("-transcript"):
+        stem = stem[: -len("-transcript")]
+    for candidate in (stem + "-summary.md", stem + "-notes.md"):
+        try:
+            notes = app.read_note(candidate)
+            break
+        except (FileNotFoundError, ValueError):
+            continue
 
     return actions_mod.Meeting(
         title=title, transcript=transcript, notes=notes,

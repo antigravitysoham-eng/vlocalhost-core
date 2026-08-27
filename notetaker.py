@@ -18,12 +18,31 @@ from transcriber import build_transcriber
 from summarizer import summarize, generate_title
 
 
+#: Words that describe the file rather than the conversation. A local model
+#: asked for a meeting title will sometimes answer "ptacotty meeting
+#: transcript", and the saved pair then reads "...-transcript-transcript.txt"
+#: and "...-transcript-summary.md" -- which is how a perfectly good summary
+#: came to be reported as missing. The title prompt asks for these to be left
+#: out; this is here because a small local model will ignore that.
+_ARTEFACT_WORDS = re.compile(
+    r"(?i)\b(transcripts?|transcription|recordings?|audio|notes?|summary|minutes)\b")
+
+
 def _slugify(text, fallback="meeting"):
     """Turn a free-text meeting title into a safe filename fragment."""
     first = (text.strip().splitlines() or [""])[0]
     first = first.strip().strip('"\'')
+    stripped = _ARTEFACT_WORDS.sub(" ", first)
+    # Keep the stripped version only if something survives. "Transcript" alone
+    # is a poor title, but it beats an empty one.
+    if re.search(r"[A-Za-z0-9]", stripped):
+        first = stripped
     first = re.sub(r"(?i)^title[:\-\s]+", "", first)  # drop a stray "Title:" label
     slug = re.sub(r"[^a-z0-9]+", "-", first.lower()).strip("-")
+    # Removing an artefact word can leave the connector that pointed at it --
+    # "recording of standup" becomes "of-standup". Drop those from either end.
+    slug = re.sub(r"^(of|the|a|an|for|on|with|about|from)-", "", slug)
+    slug = re.sub(r"-(of|the|a|an|for|on|with|about|from)$", "", slug)
     return slug[:60].strip("-") or fallback
 
 
@@ -208,8 +227,14 @@ class NoteTaker:
         title = (event.title if event and event.title else "") or generate_title(transcript)
         base = f"{date}_{_slugify(title)}" if title else f"meeting_{stamp}"
 
-        # Transcript is a plain .txt file named with the meeting name.
-        transcript_path = _unique(os.path.join(out_dir, f"{base}.txt"))
+        # Both files say what they are. They used to be "<base>.txt" and
+        # "<base>-notes.md", which reads fine until the model titles a
+        # meeting something like "ptacotty meeting transcript" -- and then
+        # the folder holds "...-transcript.txt" and
+        # "...-transcript-notes.md" and neither looks like the summary.
+        # That happened, and the summary was reported missing when it was
+        # sitting right there.
+        transcript_path = _unique(os.path.join(out_dir, f"{base}-transcript.txt"))
         header = title or "Meeting Transcript"
         with open(transcript_path, "w", encoding="utf-8") as f:
             f.write(f"{header}\n{'=' * len(header)}\nSaved: {stamp}\n\n"
@@ -217,7 +242,7 @@ class NoteTaker:
 
         summary_error = None
         notes = None
-        summary_path = _unique(os.path.join(out_dir, f"{base}-notes.md"))
+        summary_path = _unique(os.path.join(out_dir, f"{base}-summary.md"))
         try:
             notes = summarize(transcript)
             with open(summary_path, "w", encoding="utf-8") as f:
