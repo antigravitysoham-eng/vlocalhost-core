@@ -1,27 +1,34 @@
 # Transitive dependencies, locked to what the published v1.2.0 resolved to.
-# Generated from the release CycloneDX SBOMs -- do not hand-edit.
+# Generated from the release CycloneDX SBOMs of all FOUR build targets.
+# Do not hand-edit.
 #
 #     pip install -r requirements.txt -c constraints.txt
 #
-# The nine direct dependencies are pinned in requirements.txt; this file is
-# everything they dragged in, so the whole graph is fixed and not just the names
+# The nine direct dependencies are pinned in requirements.txt; this file locks
+# everything they drag in, so the whole graph is fixed and not only the names
 # we chose deliberately.
 #
-# This is the UNION of the Windows, Linux and macOS builds. The three do not
-# resolve to the same set -- colorama is Windows-only, python-xlib is Linux-only,
-# and the pyobjc trio is macOS-only -- so a lock taken from any single platform
-# would leave the other two partly unpinned. Constraints on packages that are not
-# installed are ignored by pip, so carrying all three costs nothing and is the
-# only way the lock is complete everywhere.
+# It is the union of windows-x64, linux-x64, macos-arm64 AND macos-x64. All
+# four matter. An earlier version of this file was built from the first three,
+# and the macos-x64 build then failed with ResolutionImpossible, because:
+#
+#     onnxruntime is 1.29.0 everywhere except Intel macOS, where the newest
+#     available wheel is 1.23.2
+#
+# so pinning the arm64 version made the Intel build unsatisfiable. Where a
+# package genuinely differs by platform it is written twice with environment
+# markers rather than one being picked. Intel macOS also pulls coloredlogs,
+# humanfriendly, mpmath and sympy, which the older onnxruntime needs and the
+# newer one does not.
+#
+# Constraints on packages that are not installed are ignored by pip, so
+# carrying every platform costs nothing and is the only way the lock is
+# complete everywhere.
 #
 # PyPI libraries only. The SBOM also lists CPython itself, as type application
-# with a pkg:generic purl. It is the interpreter the bundle ships rather than
-# something pip can resolve, and including it breaks both pip-audit and any
-# plain -r install with "No matching distribution found for cpython".
-#
-# No package resolved to a different version on different platforms, which is
-# what makes one shared file possible. Re-check that when bumping.
-
+# with a pkg:generic purl. It is the interpreter the bundle ships, not
+# something pip resolves, and including it fails any install with
+# "No matching distribution found for cpython".
 anyio==4.14.2
 av==18.1.0
 certifi==2026.7.22
@@ -29,6 +36,7 @@ cffi==2.1.1
 charset-normalizer==3.5.1
 click==8.5.0
 colorama==0.4.6   # windows only
+coloredlogs==15.0.1   # macos-x64 only
 ctranslate2==4.8.1
 filelock==3.32.4
 flatbuffers==25.12.19
@@ -40,19 +48,23 @@ hf-xet==1.6.0
 httpcore==1.0.9
 httpx==0.28.1
 huggingface_hub==1.28.0
+humanfriendly==10.0   # macos-x64 only
 idna==3.19
+mpmath==1.3.0   # macos-x64 only
 msal==1.28.0
-onnxruntime==1.29.0
+onnxruntime==1.23.2 ; sys_platform == "darwin" and platform_machine == "x86_64"
+onnxruntime==1.29.0 ; sys_platform != "darwin" or platform_machine != "x86_64"
 packaging==26.3
 protobuf==7.36.0
 pycparser==3.0
-pyobjc-core==12.2.2   # macos only
-pyobjc-framework-cocoa==12.2.2   # macos only
-pyobjc-framework-quartz==12.2.2   # macos only
+pyobjc-core==12.2.2   # macos-arm64, macos-x64 only
+pyobjc-framework-cocoa==12.2.2   # macos-arm64, macos-x64 only
+pyobjc-framework-quartz==12.2.2   # macos-arm64, macos-x64 only
 python-xlib==0.33   # linux only
 pyyaml==6.0.3
 setuptools==84.0.0
 six==1.17.0
+sympy==1.14.0   # macos-x64 only
 tokenizers==0.23.1
 tqdm==4.70.0
 typing_extensions==4.16.0
