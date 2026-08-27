@@ -15,6 +15,7 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
@@ -433,7 +434,8 @@ class App:
         self._busy = True
         self.record_btn.configure(state="disabled")
         if self.engine.is_listening:
-            self._set_state("Saving…", "Summarizing with the local model.")
+            self._saving_since = time.monotonic()
+            self._tick_saving()
             threading.Thread(target=self._stop_worker, daemon=True).start()
         else:
             self._set_state("Starting…", "Loading the speech model.")
@@ -449,6 +451,9 @@ class App:
 
     def _started(self):
         self._busy = False
+        # Ticker state for the "Saving..." elapsed counter.
+        self._saving_since = None
+        self._saving_job = None
         title = self.engine.event.title if self.engine.event else None
         self.transcript.configure(state="normal")
         self.transcript.delete("1.0", "end")
@@ -465,11 +470,43 @@ class App:
         self._set_state("Ready to record", "Could not start.")
         messagebox.showerror("Could not start recording", str(err))
 
+    def _tick_saving(self):
+        """Count up while the model works, so a long wait does not read as a hang.
+
+        Summarizing a real meeting on a local model is genuinely slow -- around
+        two minutes for a 7,000-character transcript on llama3.2 -- and the
+        window used to show one unchanging "Saving..." for all of it. Nothing
+        was wrong, but there was no way to tell that from the outside. A moving
+        number is the difference between "working" and "frozen".
+        """
+        if self._saving_since is None:
+            return
+        secs = int(time.monotonic() - self._saving_since)
+        if secs < 20:
+            hint = "Summarizing with the local model."
+        elif secs < 75:
+            hint = "Summarizing with the local model. This takes a minute or two."
+        else:
+            hint = ("Still summarizing. Long meetings take longer; a smaller "
+                    "Ollama model finishes sooner.")
+        self._set_state("Saving\u2026 %d:%02d" % (secs // 60, secs % 60), hint)
+        self._saving_job = self.root.after(1000, self._tick_saving)
+
+    def _stop_saving_ticker(self):
+        if self._saving_job is not None:
+            try:
+                self.root.after_cancel(self._saving_job)
+            except Exception:  # noqa: BLE001 - already fired or window gone
+                pass
+        self._saving_job = None
+        self._saving_since = None
+
     def _stop_worker(self):
         result = self.engine.stop_and_save()
         self._ui_q.put(lambda: self._stopped(result))
 
     def _stopped(self, result):
+        self._stop_saving_ticker()
         self._busy = False
         # Anything still showing as provisional was superseded by the flush
         # that Stop performed; leaving it would put unfinished words at the
