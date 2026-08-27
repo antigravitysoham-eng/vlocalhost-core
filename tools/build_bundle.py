@@ -75,7 +75,8 @@ _HOST = {
 }
 
 #: Copied into the bundle. Everything else in the repo is for developers.
-INCLUDE_FILES = ("requirements.txt", "LICENSE", "README.md", "TRADEMARK.md")
+INCLUDE_FILES = ("requirements.txt", "constraints.txt", "LICENSE", "README.md",
+                 "TRADEMARK.md")
 INCLUDE_DIRS = ("integrations", "assets", "docs")
 SKIP_DIRS = {"__pycache__", ".git", ".github", "tools", "notes", ".venv",
              "dist", "build"}
@@ -151,11 +152,24 @@ def install_dependencies(runtime):
     """Install requirements straight into the shipped interpreter."""
     python = interpreter(runtime)
     requirements = os.path.join(ROOT, "requirements.txt")
+    # requirements.txt pins the nine direct dependencies; constraints.txt pins
+    # everything they drag in. Without the -c the transitive graph floats, and
+    # an identically-named build could ship different code depending on the day
+    # it ran -- which is the whole thing the pinning was for.
+    constraints = os.path.join(ROOT, "constraints.txt")
     log("installing dependencies into the interpreter")
     subprocess.run([python, "-m", "pip", "install", "--upgrade", "pip",
                     "--disable-pip-version-check", "-q"], check=True)
-    subprocess.run([python, "-m", "pip", "install", "-r", requirements,
-                    "--disable-pip-version-check", "-q"], check=True)
+    install = [python, "-m", "pip", "install", "-r", requirements,
+               "--disable-pip-version-check", "-q"]
+    if os.path.exists(constraints):
+        install += ["-c", constraints]
+    else:
+        # Loud rather than silent: a missing lock file means the build is not
+        # reproducible, and finding that out from a diverging SBOM months later
+        # is worse than a line in the log now.
+        log("WARNING: constraints.txt not found - transitive deps are unpinned")
+    subprocess.run(install, check=True)
     # A conflict here would otherwise surface as an ImportError on a user's
     # machine, long after anyone can connect it to the build.
     subprocess.run([python, "-m", "pip", "check"], check=True)

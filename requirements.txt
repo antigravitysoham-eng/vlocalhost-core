@@ -1,25 +1,43 @@
-sounddevice>=0.4.6
+sounddevice==0.5.6
 # The fallback voice detector. Still here on purpose: if the Silero model will
 # not load, recording continues on this rather than failing.
-webrtcvad-wheels>=2.0.14
+webrtcvad-wheels==2.0.14
 # Captures the other people on a video call from your system audio
 # (WASAPI loopback on Windows, PulseAudio monitor on Linux). Needed for
 # CAPTURE_MODE = "both" / "system"; the mic works without it.
-soundcard>=0.4.3
-# 1.2.1 is a real floor, not caution. The voice detector loads
-# `silero_vad_v6.onnx` from this package's own assets, and that file first
-# shipped in 1.2.1. Resolve anything older and the Silero path fails its
-# import, the app quietly falls back to webrtcvad, and the thing that makes a
-# noisy room usable is silently absent -- the transcript stops appearing until
+soundcard==0.4.6
+# 1.2.1 was a real floor, not caution, and it is now also the pin. The voice
+# detector loads `silero_vad_v6.onnx` from this package's own assets, and that
+# file first shipped in 1.2.1. Resolve anything older and the Silero path fails
+# its import, the app quietly falls back to webrtcvad, and the thing that makes
+# a noisy room usable is silently absent -- the transcript stops appearing until
 # you press Stop, with nothing to say why. onnxruntime comes with it
-# (faster-whisper requires >=1.14), so the runtime needs no line of its own.
-faster-whisper>=1.2.1
-numpy>=1.24
-requests>=2.31
-pystray>=0.19
-Pillow>=10.0
+# (faster-whisper requires >=1.14), so the runtime needs no line of its own;
+# constraints.txt pins the version that came with it.
+faster-whisper==1.2.1
+numpy==2.5.2
+requests==2.34.2
+pystray==0.19.5
+Pillow==12.3.0
 # Only for "Benchmark this machine" in Settings; everything else works without it.
-psutil>=5.9
+psutil==7.2.2
 
 # Calendar / email providers are not part of Core and need no packages here.
 # Nothing in this list can reach the network on your behalf.
+
+# --- Why these are pinned, not floored -------------------------------------
+# `>=` floors meant an identically-named build could contain different code
+# depending on the day it was built. That broke three things at once:
+# reproducibility, the ability to answer "is version X affected by CVE-Y", and
+# the accuracy of the SBOM the moment it left the builder.
+#
+# These versions are not "latest" -- they are exactly what the published v1.2.0
+# resolved to, read back from its own CycloneDX SBOM. Pinning to latest would
+# have changed the software; pinning to the shipped set changes only whether it
+# can be rebuilt.
+#
+# Install the full locked set, transitive dependencies included, with:
+#     pip install -r requirements.txt -c constraints.txt
+#
+# When bumping: change the pin, rebuild, and re-read the SBOM so constraints.txt
+# and this file continue to agree.

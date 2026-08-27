@@ -1,0 +1,74 @@
+# Check the pinned dependency set for known vulnerabilities.
+#
+# Weekly matters more than per-push, and that is the reason this runs on a
+# schedule at all: most CVEs appear in code nobody touched. A project that only
+# audits on change will sit on a vulnerable pin for as long as nobody edits the
+# file it is written in, which for a lock file is close to forever.
+name: audit
+
+on:
+  schedule:
+    # Mondays 07:00 UTC. GitHub's cron is best-effort; an hour's drift is fine,
+    # a week's would not be, which is what workflow_dispatch is for.
+    - cron: "0 7 * * 1"
+  push:
+    paths:
+      - "requirements.txt"
+      - "constraints.txt"
+      - ".github/workflows/audit.yml"
+  pull_request:
+    paths:
+      - "requirements.txt"
+      - "constraints.txt"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pip-audit:
+    # One runner per platform, because the dependency graph genuinely differs:
+    # colorama is Windows-only, python-xlib Linux-only, and the pyobjc trio
+    # macOS-only. A single-platform audit would silently never look at five of
+    # the packages we ship.
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false        # one platform's advisory must not hide another's
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Match the interpreter the bundles ship, or the audit describes a
+          # dependency graph no user actually has.
+          python-version: "3.12"
+
+      - name: Install pip-audit
+        run: python -m pip install --disable-pip-version-check -q pip-audit
+
+      - name: Audit the locked set
+        # constraints.txt is passed with -c, not -r, and that distinction is the
+        # whole reason this works. As a *requirement* file it would ask every
+        # runner to install every platform's packages, and pyobjc-core refuses
+        # to build anywhere but macOS -- the audit then fails on a build error
+        # rather than reporting on vulnerabilities. As a *constraint* file it
+        # only pins whatever this platform genuinely resolves, and the union is
+        # covered because the three runners between them install all of it.
+        #
+        # --strict fails on an unfixable advisory too. Deliberate: the point is
+        # to know, not to be reassured.
+        run: |
+          python -m pip_audit --strict --progress-spinner=off \
+            -r requirements.txt -c constraints.txt
+
+      - name: What to do if this failed
+        if: failure()
+        run: |
+          echo "::notice::A pinned dependency has a known advisory on ${{ matrix.os }}."
+          echo "Bump the pin in requirements.txt or constraints.txt, rebuild, then"
+          echo "re-read the release SBOM so both files still agree with what ships."
+          echo "If the advisory has no fix, say so in the release notes rather than"
+          echo "pinning around it quietly."

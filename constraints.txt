@@ -1,0 +1,59 @@
+# Transitive dependencies, locked to what the published v1.2.0 resolved to.
+# Generated from the release CycloneDX SBOMs -- do not hand-edit.
+#
+#     pip install -r requirements.txt -c constraints.txt
+#
+# The nine direct dependencies are pinned in requirements.txt; this file is
+# everything they dragged in, so the whole graph is fixed and not just the names
+# we chose deliberately.
+#
+# This is the UNION of the Windows, Linux and macOS builds. The three do not
+# resolve to the same set -- colorama is Windows-only, python-xlib is Linux-only,
+# and the pyobjc trio is macOS-only -- so a lock taken from any single platform
+# would leave the other two partly unpinned. Constraints on packages that are not
+# installed are ignored by pip, so carrying all three costs nothing and is the
+# only way the lock is complete everywhere.
+#
+# PyPI libraries only. The SBOM also lists CPython itself, as type application
+# with a pkg:generic purl. It is the interpreter the bundle ships rather than
+# something pip can resolve, and including it breaks both pip-audit and any
+# plain -r install with "No matching distribution found for cpython".
+#
+# No package resolved to a different version on different platforms, which is
+# what makes one shared file possible. Re-check that when bumping.
+
+anyio==4.14.2
+av==18.1.0
+certifi==2026.7.22
+cffi==2.1.1
+charset-normalizer==3.5.1
+click==8.5.0
+colorama==0.4.6   # windows only
+ctranslate2==4.8.1
+filelock==3.32.4
+flatbuffers==25.12.19
+fsspec==2026.7.0
+google-api-python-client==2.100.0
+google-auth-oauthlib==1.2.0
+h11==0.16.0
+hf-xet==1.6.0
+httpcore==1.0.9
+httpx==0.28.1
+huggingface_hub==1.28.0
+idna==3.19
+msal==1.28.0
+onnxruntime==1.29.0
+packaging==26.3
+protobuf==7.36.0
+pycparser==3.0
+pyobjc-core==12.2.2   # macos only
+pyobjc-framework-cocoa==12.2.2   # macos only
+pyobjc-framework-quartz==12.2.2   # macos only
+python-xlib==0.33   # linux only
+pyyaml==6.0.3
+setuptools==84.0.0
+six==1.17.0
+tokenizers==0.23.1
+tqdm==4.70.0
+typing_extensions==4.16.0
+urllib3==2.7.0
