@@ -5,22 +5,55 @@ speaker and the detected language code. ``config.NOTES_LANGUAGE`` decides
 whether the notes come back in English or in whatever was spoken.
 """
 
+import re
+
 import requests
 
 import config
 import languages
 
+# "[10:04:22] " or "[10:04] " at the head of a transcript line.
+_TS = re.compile(r"^\[\d{1,2}:\d{2}(?::\d{2})?\]\s*", re.MULTILINE)
+# The same marker anywhere in a line, for scrubbing what the model returns.
+_TS_ANY = re.compile(r"\[\d{1,2}:\d{2}(?::\d{2})?\]\s*")
+
+
+def strip_timestamps(text: str) -> str:
+    """Remove ``[HH:MM:SS]`` markers from a transcript, or from model output.
+
+    The summary used to come back full of timestamps, which made the notes
+    read as a second copy of the transcript rather than a summary of it. The
+    cause was not the model misbehaving. It was handed a timestamp on every
+    line and told the transcript was timestamped, so it mirrored the format
+    back -- exactly what a language model is supposed to do. The fix is to
+    stop showing it something we do not want returned.
+
+    Speaker labels are deliberately kept: "You:" and "Them:" are what make an
+    action item attributable to somebody.
+    """
+    return _TS.sub("", text or "")
+
+
+def scrub_timestamps(text: str) -> str:
+    """Belt and braces for the model's output.
+
+    The instruction alone is not reliable across the range of local models
+    people run -- a 3B model will cheerfully ignore it, and the failure is
+    silent and ugly. Cheap to do, so do it.
+    """
+    return _TS_ANY.sub("", text or "")
+
 _LANGUAGE_RULE = """
 The transcript may be in any language, and may switch between languages. Lines \
-may be tagged with the speaker and a language code, like "[10:04] You (hi):". \
+may be tagged with the speaker and a language code, like "You (hi):". \
 Those tags are metadata — never copy them into the notes. \
 {directive}
 """
 
-_PROMPT = """You are a meeting notes assistant. Below is a raw, timestamped \
-transcript of a meeting captured from a microphone. It may contain transcription \
-errors, filler words, and incomplete sentences. Produce clean, professional \
-meeting notes in Markdown with exactly these sections:
+_PROMPT = """You are a meeting notes assistant. Below is a raw transcript of a \
+meeting captured from a microphone. It may contain transcription errors, filler \
+words, and incomplete sentences. Produce clean, professional meeting notes in \
+Markdown with exactly these sections:
 
 ## Summary
 A short paragraph (3-5 sentences) capturing what the meeting was about.
@@ -36,6 +69,8 @@ A short paragraph (3-5 sentences) capturing what the meeting was about.
 Write "None recorded." if there were none.
 
 Only use information present in the transcript. Do not invent details.
+
+Do not write clock times such as 10:04 unless a time was actually spoken as part of a decision or a deadline. These are notes, not a log. The timestamped record already exists in the transcript file saved beside this one, and repeating it here would make the two files copies of each other.
 {language_rule}
 TRANSCRIPT:
 {transcript}
@@ -88,8 +123,13 @@ def generate_title(transcript: str) -> str:
 
 
 def summarize(transcript: str) -> str:
-    """Return Markdown notes, or raise RuntimeError if Ollama is unreachable."""
-    prompt = _PROMPT.format(transcript=transcript, language_rule=_language_rule())
+    """Return Markdown notes, or raise RuntimeError if Ollama is unreachable.
+
+    Timestamps are stripped on the way in and scrubbed on the way out, so the
+    notes stay a summary rather than becoming a second transcript.
+    """
+    prompt = _PROMPT.format(transcript=strip_timestamps(transcript),
+                            language_rule=_language_rule())
     try:
         resp = requests.post(
             f"{config.OLLAMA_URL}/api/generate",
@@ -105,4 +145,4 @@ def summarize(transcript: str) -> str:
     except requests.exceptions.HTTPError as e:
         raise RuntimeError(f"Ollama returned an error: {e} — {resp.text}") from e
 
-    return resp.json().get("response", "").strip()
+    return scrub_timestamps(resp.json().get("response", "").strip())

@@ -100,9 +100,20 @@ python vlocalhost.py --devices   # what this machine can record
 python vlocalhost.py --mcp       # MCP server on stdio (see §7)
 ```
 
-Notes are written to `notes/`, named after the meeting:
-- `<date>_<meeting-title>.txt` — raw timestamped transcript
-- `<date>_<meeting-title>-notes.md` — Summary / Key Points / Decisions / Action Items
+Every meeting produces **two files** in `notes/`, named after the meeting. They
+are deliberately different documents, not two copies of the same one:
+
+- `<date>_<meeting-title>.txt` — **the transcript.** The full record, every line
+  stamped `[HH:MM:SS]`, in whatever languages were spoken. This is the evidence.
+- `<date>_<meeting-title>-notes.md` — **the summary.** Summary / Key Points /
+  Decisions / Action Items, and **no timestamps** — clock times are stripped
+  before the model sees the transcript and scrubbed again from what it returns.
+  A time only appears here if somebody actually said one, as a deadline or a
+  next meeting.
+
+If the summary read like a second copy of the transcript in an older build, that
+is what this fixes: the model was being handed a timestamp on every line and
+told the transcript was timestamped, so it mirrored the format straight back.
 
 ## 4. Recording both sides of a call
 

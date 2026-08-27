@@ -120,7 +120,8 @@ Leave it on `cpu`/`int8` otherwise.
 
 Summaries are written by whatever Ollama has installed. Recording and
 transcription do not need Ollama at all — without it you still get a full
-timestamped transcript, and only the `-notes.md` summary is skipped.
+timestamped transcript, and only the `-notes.md` summary is skipped. The
+transcript keeps its timestamps; the summary never has them.
 
 ### Use a different model
 

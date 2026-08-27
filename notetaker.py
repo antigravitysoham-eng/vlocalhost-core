@@ -221,7 +221,10 @@ class NoteTaker:
         try:
             notes = summarize(transcript)
             with open(summary_path, "w", encoding="utf-8") as f:
-                f.write(f"# {title or 'Meeting Notes'} — {stamp}\n\n{notes}\n")
+                # No timestamp in the heading. The date is already in the
+                # filename, and a summary that opens with a clock time reads
+                # like a log entry rather than a set of notes.
+                f.write(f"# {title or 'Meeting Notes'}\n\n{notes}\n")
         except Exception as e:  # noqa: BLE001
             summary_error = str(e)
             summary_path = None
