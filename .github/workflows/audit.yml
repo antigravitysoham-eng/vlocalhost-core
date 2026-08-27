@@ -49,20 +49,27 @@ jobs:
       - name: Install pip-audit
         run: python -m pip install --disable-pip-version-check -q pip-audit
 
-      - name: Audit the locked set
-        # constraints.txt is passed with -c, not -r, and that distinction is the
-        # whole reason this works. As a *requirement* file it would ask every
-        # runner to install every platform's packages, and pyobjc-core refuses
-        # to build anywhere but macOS -- the audit then fails on a build error
-        # rather than reporting on vulnerabilities. As a *constraint* file it
-        # only pins whatever this platform genuinely resolves, and the union is
-        # covered because the three runners between them install all of it.
+      - name: Audit the dependency tree
+        # pip-audit has no -c/--constraint flag. An earlier version of this file
+        # passed one; pip-audit read "constraints.txt" as a positional project
+        # path and failed with "argument project_path: not allowed with -r".
+        #
+        # So the audit resolves requirements.txt in its own throwaway venv and
+        # checks the whole resolved tree, transitive packages included. The nine
+        # direct dependencies are pinned exactly, which bounds that resolution
+        # tightly -- but it is worth being precise about the limit: pip-audit
+        # resolves transitive packages itself rather than reading constraints.txt,
+        # so what it checks can differ from the locked set by a patch version.
+        # constraints.txt is what the *build* installs with; this is what CI can
+        # verify without asking every runner to build every platform's packages.
+        #
+        # Matrixed because the trees genuinely differ -- colorama is Windows-only,
+        # python-xlib Linux-only, the pyobjc trio macOS-only -- and a single
+        # runner would never look at five of the packages we ship.
         #
         # --strict fails on an unfixable advisory too. Deliberate: the point is
         # to know, not to be reassured.
-        run: |
-          python -m pip_audit --strict --progress-spinner=off \
-            -r requirements.txt -c constraints.txt
+        run: python -m pip_audit --strict --progress-spinner=off -r requirements.txt
 
       - name: What to do if this failed
         if: failure()
