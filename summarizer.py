@@ -123,6 +123,71 @@ def generate_title(transcript: str) -> str:
     return resp.json().get("response", "").strip()
 
 
+def to_plain_text(md: str) -> str:
+    """Render the model's Markdown as plain text.
+
+    The summary is saved as .txt and the same string is used for the email body
+    and the calendar description. None of those three render Markdown: on
+    Windows a .md file often has no default program at all, and an attendee
+    reading the email just sees literal "## Summary" and "- [ ]" characters.
+
+    This is not a general Markdown implementation and does not need to be. The
+    model is asked for four fixed sections and produces headings, bullets and
+    task boxes; those are what this handles.
+    """
+    out = []
+    for raw in (md or "").splitlines():
+        line = raw.rstrip()
+        # Inline emphasis and code ticks, which carry no meaning in plain text.
+        line = re.sub(r"\*\*(.+?)\*\*", r"\1", line)
+        line = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"\1", line)
+        line = line.replace("`", "")
+
+        stripped = line.strip()
+        if not stripped:
+            out.append("")
+            continue
+
+        heading = re.match(r"^(#{1,6})\s+(.*)$", stripped)
+        if heading:
+            text = heading.group(2).strip()
+            # A blank line before a heading, but never a leading one.
+            if out and out[-1] != "":
+                out.append("")
+            out.append(text.upper() if len(heading.group(1)) >= 2 else text)
+            continue
+
+        task = re.match(r"^[-*+]\s+\[([ xX])\]\s*(.*)$", stripped)
+        if task:
+            box = "x" if task.group(1).lower() == "x" else " "
+            out.append("  [%s] %s" % (box, task.group(2).strip()))
+            continue
+
+        bullet = re.match(r"^[-*+]\s+(.*)$", stripped)
+        if bullet:
+            out.append("  - %s" % bullet.group(1).strip())
+            continue
+
+        numbered = re.match(r"^(\d+[.)])\s+(.*)$", stripped)
+        if numbered:
+            out.append("  %s %s" % (numbered.group(1), numbered.group(2).strip()))
+            continue
+
+        out.append("  %s" % stripped)
+
+    # Collapse runs of blank lines and trim the ends.
+    text, blank = [], False
+    for line in out:
+        if line == "":
+            if blank:
+                continue
+            blank = True
+        else:
+            blank = False
+        text.append(line)
+    return "\n".join(text).strip()
+
+
 def summarize(transcript: str) -> str:
     """Return Markdown notes, or raise RuntimeError if Ollama is unreachable.
 

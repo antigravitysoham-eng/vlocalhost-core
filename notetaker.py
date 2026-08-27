@@ -15,7 +15,7 @@ import config
 from audio_listener import build_listener
 from integrations import store
 from transcriber import build_transcriber
-from summarizer import summarize, generate_title
+from summarizer import summarize, generate_title, to_plain_text
 
 
 #: Words that describe the file rather than the conversation. A local model
@@ -26,6 +26,23 @@ from summarizer import summarize, generate_title
 #: out; this is here because a small local model will ignore that.
 _ARTEFACT_WORDS = re.compile(
     r"(?i)\b(transcripts?|transcription|recordings?|audio|notes?|summary|minutes)\b")
+
+
+def _clean_title(text):
+    """Drop artefact words from a model-generated title, keeping it readable.
+
+    Same words as :data:`_ARTEFACT_WORDS`, applied to the human-facing title
+    rather than the slug. Returns the original if nothing would survive -- a
+    meeting genuinely called "Notes" keeps its name.
+    """
+    first = (text or "").strip().splitlines()
+    first = first[0].strip().strip(chr(34) + chr(39)) if first else ""
+    first = re.sub(r"(?i)^title[:\-\s]+", "", first)
+    stripped = _ARTEFACT_WORDS.sub(" ", first)
+    stripped = re.sub(r"\s+", " ", stripped).strip(" -,:")
+    stripped = re.sub(r"(?i)^(of|the|a|an|for|on|with|about|from)\s+", "", stripped)
+    stripped = re.sub(r"(?i)\s+(of|the|a|an|for|on|with|about|from)$", "", stripped)
+    return stripped if re.search(r"[A-Za-z0-9]", stripped) else first
 
 
 def _slugify(text, fallback="meeting"):
@@ -213,7 +230,7 @@ class NoteTaker:
         Files are named ``<date>_<meeting-title>``. When ``event`` is given, its
         calendar title is used instead of asking the model to invent one.
         Returns (paths, error); ``paths['title']`` is the human meeting name and
-        ``paths['notes']`` is the summary Markdown (for emailing/posting back)."""
+        ``paths['notes']`` is the summary as plain text (for emailing/posting back)."""
         transcript = self.transcript_text()
         if not transcript.strip():
             return None, "Nothing was transcribed — no notes to save."
@@ -225,6 +242,13 @@ class NoteTaker:
         # Prefer the real calendar title; otherwise ask the model to name it,
         # falling back to a timestamp if Ollama is unreachable.
         title = (event.title if event and event.title else "") or generate_title(transcript)
+        # Clean the title once, so the heading inside the file and the name on
+        # disk agree. Stripping only in _slugify left a file called
+        # "...-ptacotty-meeting-summary.txt" whose first line read "ptacotty
+        # meeting transcript", which is the same confusion one layer down.
+        # A calendar title is the user's own words and is left alone.
+        if not (event and event.title):
+            title = _clean_title(title)
         base = f"{date}_{_slugify(title)}" if title else f"meeting_{stamp}"
 
         # Both files say what they are. They used to be "<base>.txt" and
@@ -242,14 +266,20 @@ class NoteTaker:
 
         summary_error = None
         notes = None
-        summary_path = _unique(os.path.join(out_dir, f"{base}-summary.md"))
+        summary_path = _unique(os.path.join(out_dir, f"{base}-summary.txt"))
         try:
-            notes = summarize(transcript)
+            notes = to_plain_text(summarize(transcript))
             with open(summary_path, "w", encoding="utf-8") as f:
                 # No timestamp in the heading. The date is already in the
                 # filename, and a summary that opens with a clock time reads
                 # like a log entry rather than a set of notes.
-                f.write(f"# {title or 'Meeting Notes'}\n\n{notes}\n")
+                #
+                # Written as plain text, not Markdown. Nothing that reads this
+                # renders Markdown -- not Notepad, not the email body, not the
+                # calendar description -- so the syntax was only ever visible
+                # as "##" and "- [ ]" clutter.
+                heading = title or "Meeting Notes"
+                f.write(f"{heading}\n{'=' * len(heading)}\n\n{notes}\n")
         except Exception as e:  # noqa: BLE001
             summary_error = str(e)
             summary_path = None

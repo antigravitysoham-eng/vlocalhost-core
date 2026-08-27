@@ -105,7 +105,7 @@ are deliberately different documents, not two copies of the same one:
 
 - `<date>_<meeting-title>-transcript.txt` — **the transcript.** The full record, every line
   stamped `[HH:MM:SS]`, in whatever languages were spoken. This is the evidence.
-- `<date>_<meeting-title>-summary.md` — **the summary.** Summary / Key Points /
+- `<date>_<meeting-title>-summary.txt` — **the summary.** Summary / Key Points /
   Decisions / Action Items, and **no timestamps** — clock times are stripped
   before the model sees the transcript and scrubbed again from what it returns.
   A time only appears here if somebody actually said one, as a deadline or a

@@ -381,7 +381,8 @@ class AppEngine:
                 # not a reason to stop recognising what a user saved last
                 # month.
                 "kind": ("notes"
-                         if name.endswith(("-summary.md", "-notes.md"))
+                         if name.endswith(("-summary.txt", "-summary.md",
+                                           "-notes.md"))
                          else "transcript"),
                 "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(
                     timespec="seconds"),

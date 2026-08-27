@@ -53,7 +53,8 @@ def _load(name: str = ""):
     stem = os.path.splitext(item["name"])[0]
     if stem.endswith("-transcript"):
         stem = stem[: -len("-transcript")]
-    for candidate in (stem + "-summary.md", stem + "-notes.md"):
+    for candidate in (stem + "-summary.txt", stem + "-summary.md",
+                      stem + "-notes.md"):
         try:
             notes = app.read_note(candidate)
             break
