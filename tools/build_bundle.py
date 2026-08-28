@@ -249,27 +249,40 @@ def write_manifest(staging, target, packages):
 
 #: Shipped at the top of the bundle as well as inside app/docs. Somebody who
 #: unpacks a ZIP and meets a folder of runtime/, app/ and a .cmd has nowhere to
-#: turn when the .cmd does nothing; the guide has to be where they already are.
-GUIDE_PDF = "vlocalhost-installation-guide.pdf"
-GUIDE_VISIBLE_NAME = "Installation Guide.pdf"
+#: turn when the .cmd does nothing; the guides have to be where they already
+#: are. INCLUDE_DIRS already carries all of docs/ into app/docs — this is only
+#: the visible copy, under a name that reads as a document and not a build
+#: artifact.
+#:
+#: These names are duplicated in ``diagnostics.DOCS``, which is what looks for
+#: them at runtime. Change one and change the other, or Settings opens the
+#: online fallback on a bundle that has the file sitting right there.
+GUIDES = {
+    "vlocalhost-installation-guide.pdf": "Installation Guide.pdf",
+    "vlocalhost-summaries-setup.pdf": "Summaries Setup.pdf",
+}
 
 
 def copy_guide(staging):
-    """Put the installation guide at the root of the bundle.
+    """Put the shipped guides at the root of the bundle.
 
-    Generated in the vlocalhost-ai repository by ``tools/make_install_guide.py``
-    and committed here — never hand-edit ``docs/`` copy, it is overwritten on
-    the next regeneration. Missing is a warning rather than an error so a
-    contributor's build does not fail over a document.
+    Generated in the vlocalhost-ai repository by ``tools/build_install_guide.py``
+    and ``tools/build_summaries_guide.py`` and committed here — never hand-edit
+    the ``docs/`` copies, they are overwritten on the next regeneration. A
+    missing one is a warning rather than an error, so a contributor's build
+    does not fail over a document.
     """
-    source = os.path.join(ROOT, "docs", GUIDE_PDF)
-    if not os.path.isfile(source):
-        log(f"WARNING: {GUIDE_PDF} not in docs/ — bundle ships without the guide")
-        return None
-    dest = os.path.join(staging, GUIDE_VISIBLE_NAME)
-    shutil.copy2(source, dest)
-    log(f"guide: {GUIDE_VISIBLE_NAME}")
-    return dest
+    copied = []
+    for filename, visible in GUIDES.items():
+        source = os.path.join(ROOT, "docs", filename)
+        if not os.path.isfile(source):
+            log(f"WARNING: {filename} not in docs/ — bundle ships without it")
+            continue
+        dest = os.path.join(staging, visible)
+        shutil.copy2(source, dest)
+        log(f"guide: {visible}")
+        copied.append(dest)
+    return copied
 
 
 def write_launchers(staging, target):

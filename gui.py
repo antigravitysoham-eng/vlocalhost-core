@@ -1076,37 +1076,50 @@ class App:
         helpbox = ttk.LabelFrame(parent, text="Help", style="Card.TLabelframe",
                                  padding=14)
         helpbox.pack(fill="x", pady=(14, 0))
-        ttk.Label(helpbox, text="The installation guide ships with the app, so "
-                                "it works with no internet: installing on each "
-                                "platform, first run, and what every error "
-                                "message actually means.",
+        ttk.Label(helpbox, text="Both guides ship with the app, so they work "
+                                "with no internet. The installation guide "
+                                "covers each platform, first run and what "
+                                "every error message means. The summaries "
+                                "guide covers Ollama — installing it, "
+                                "choosing a model, and why a meeting can save "
+                                "a transcript and no notes.",
                   style="Muted.TLabel", wraplength=820, justify="left").pack(
             anchor="w")
         help_buttons = ttk.Frame(helpbox)
         help_buttons.pack(anchor="w", pady=(10, 0))
         ttk.Button(help_buttons, text="Installation guide",
                    command=self._open_guide).pack(side="left")
+        ttk.Button(help_buttons, text="Summaries setup guide",
+                   command=self._open_summaries_guide).pack(side="left",
+                                                            padx=8)
         ttk.Button(help_buttons, text="Support page",
-                   command=self._open_support).pack(side="left", padx=8)
+                   command=self._open_support).pack(side="left")
 
         ttk.Label(parent, text=f"Settings file: {settings.path()}",
                   style="Mono.TLabel").pack(anchor="w", pady=(14, 0))
 
     # diagnostics is imported where it is used, as everywhere else in this
     # file — it pulls in platform and traceback, and startup does not need it.
-    def _open_guide(self):
-        """Open the bundled PDF, or say where it went if that is not possible."""
+    def _open_doc(self, kind):
+        """Open a bundled PDF, or say where it went if that is not possible."""
         import diagnostics
 
-        if diagnostics.open_guide():
-            self.status_left.configure(text="Opened the installation guide.")
+        label = diagnostics.DOCS[kind][3]
+        if diagnostics.open_doc(kind):
+            self.status_left.configure(text=f"Opened the {label}.")
         else:
-            path = diagnostics.guide_path()
+            path = diagnostics.doc_path(kind)
             # A file exists but nothing would open it — name it, so the user
             # can reach it themselves rather than press the button again.
             self.status_left.configure(
                 text=f"Guide: {path}" if path
-                else "No guide in this copy — opened the online one.")
+                else f"No {label} in this copy — opened the online one.")
+
+    def _open_guide(self):
+        self._open_doc("guide")
+
+    def _open_summaries_guide(self):
+        self._open_doc("summaries")
 
     def _open_support(self):
         import diagnostics

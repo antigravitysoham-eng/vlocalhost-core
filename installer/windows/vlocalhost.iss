@@ -122,6 +122,11 @@ Name: "{group}\{#AppName}"; Filename: "{app}\runtime\pythonw.exe"; \
 ; in Program Files, so it needs an entry of its own.
 Name: "{group}\Installation Guide"; Filename: "{app}\Installation Guide.pdf"; \
   Comment: "Installing, first run, and what each error means"
+; The summaries guide sits beside it: the Ollama setup is the one thing
+; the installer cannot do for the user, and it is what a meeting that
+; saved a transcript and no notes sends them looking for.
+Name: "{group}\Summaries Setup"; Filename: "{app}\Summaries Setup.pdf"; \
+  Comment: "Installing Ollama and a model, so meetings get written notes"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\runtime\pythonw.exe"; \
   Parameters: """{app}\app\vlocalhost.py"""; WorkingDir: "{app}\app"; \

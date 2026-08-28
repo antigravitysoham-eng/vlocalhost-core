@@ -219,22 +219,50 @@ def open_support() -> None:
 
 
 GUIDE_URL = "https://vlocal.host/install/guide/"
-_GUIDE_PDF = "vlocalhost-installation-guide.pdf"
+
+# The summaries guide has no page of its own on the site yet. Its subject is
+# described, and the PDF named, in the installation guide's first-run section,
+# so that anchor is the honest fallback rather than the top of a long page.
+SUMMARIES_URL = GUIDE_URL + "#first-run"
+
+#: Every document the build ships, keyed by the name the rest of the app uses.
+#: Each entry is (file name in docs/, the friendlier name ``build_bundle.py``
+#: gives it at the root of the download, where to go when neither exists, and
+#: what to call it in a message).
+#:
+#: A table rather than a function per document: there are two now and the
+#: second one arrived by copy-and-paste pressure, which is exactly how the
+#: fallback chain would have come to differ between them.
+DOCS = {
+    "guide": (
+        "vlocalhost-installation-guide.pdf",
+        "Installation Guide.pdf",
+        GUIDE_URL,
+        "installation guide",
+    ),
+    "summaries": (
+        "vlocalhost-summaries-setup.pdf",
+        "Summaries Setup.pdf",
+        SUMMARIES_URL,
+        "summaries setup guide",
+    ),
+}
 
 
-def guide_path() -> "str | None":
-    """The installation guide PDF that shipped with this copy, if it did.
+def doc_path(kind: str = "guide") -> "str | None":
+    """The shipped PDF for ``kind``, if this copy has it.
 
-    Two places, because the build puts it in two: ``docs/`` beside the app, and
-    the root of the bundle where somebody opening the folder will see it. A
-    checkout run from source has the first and not the second; the macOS bundle
-    has both, one level further up.
+    Three places, because the build puts it in more than one: ``docs/`` beside
+    the app, and the root of the bundle where somebody opening the folder will
+    see it. A checkout run from source has the first and not the second; the
+    macOS bundle has both, one level further up.
     """
+    filename, visible, _url, _label = DOCS[kind]
     here = os.path.dirname(os.path.abspath(__file__))
     candidates = (
-        os.path.join(here, "docs", _GUIDE_PDF),
-        os.path.join(os.path.dirname(here), "Installation Guide.pdf"),
-        os.path.join(os.path.dirname(here), _GUIDE_PDF),
+        os.path.join(here, "docs", filename),
+        os.path.join(os.path.dirname(here), visible),
+        os.path.join(os.path.dirname(here), filename),
     )
     for path in candidates:
         if os.path.isfile(path):
@@ -242,8 +270,8 @@ def guide_path() -> "str | None":
     return None
 
 
-def open_guide() -> bool:
-    """Open the shipped guide, falling back to the online one.
+def open_doc(kind: str = "guide") -> bool:
+    """Open a shipped guide, falling back to the web.
 
     Returns True if a local file was opened. The fallback matters: running from
     source there is no PDF, and a Help button that does nothing is worse than
@@ -252,12 +280,13 @@ def open_guide() -> bool:
     import subprocess
     import webbrowser
 
-    path = guide_path()
+    _filename, _visible, url, label = DOCS[kind]
+    path = doc_path(kind)
     if not path:
         try:
-            webbrowser.open(GUIDE_URL)
+            webbrowser.open(url)
         except Exception:  # noqa: BLE001
-            print(f"Guide: {GUIDE_URL}", flush=True)
+            print(f"{label.capitalize()}: {url}", flush=True)
         return False
 
     try:
@@ -270,9 +299,20 @@ def open_guide() -> bool:
     except Exception:  # noqa: BLE001
         # No PDF reader, or no desktop session. The file is still on disk and
         # naming it is more use than a silent failure.
-        print(f"Installation guide: {path}", flush=True)
+        print(f"{label.capitalize()}: {path}", flush=True)
         return False
     return True
+
+
+# The installation guide by its own name, because that is what every caller
+# outside this module already asks for, and because ``--guide`` on the command
+# line has meant this one thing since 1.0.
+def guide_path() -> "str | None":
+    return doc_path("guide")
+
+
+def open_guide() -> bool:
+    return open_doc("guide")
 
 
 # ---------------------------------------------------------------------------

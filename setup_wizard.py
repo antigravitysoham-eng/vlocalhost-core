@@ -69,6 +69,35 @@ DEFAULT_LANGUAGE = "en"
 #: Long enough for a busy machine, short enough that nobody thinks we hung.
 PROBE_TIMEOUT = 2.5
 
+#: Where somebody who has never heard of Ollama has to go.
+OLLAMA_SITE = "https://ollama.com/download"
+
+#: How often to look again while the user is off installing it, in ms. The
+#: whole point is that they leave this window open, install Ollama in another
+#: one, and come back to find the step has moved on by itself -- so it has to
+#: be often enough to feel immediate and cheap enough to run all day. The probe
+#: is one HTTP call to a loopback address that is not listening.
+WATCH_EVERY = 4000
+
+
+def install_hint() -> tuple:
+    """(what to do, the command to type) for installing Ollama on this OS.
+
+    The old screen said "install it from ollama.com" and stopped there, which
+    is a fine instruction for somebody who already knows what Ollama is and no
+    instruction at all for the person actually reading it. Three sentences,
+    picked by platform, cost nothing and remove the guess.
+    """
+    system = _platform.system()
+    if system == "Windows":
+        return ("Download it from ollama.com. The Windows installer needs no "
+                "administrator rights and starts the server for you.", "")
+    if system == "Darwin":
+        return ("Download it from ollama.com. Open the .dmg, drag Ollama into "
+                "Applications, and launch it once.", "")
+    return ("Install it from a terminal:",
+            "curl -fsSL https://ollama.com/install.sh | sh")
+
 
 # ---------------------------------------------------------------------------
 # Ollama, over HTTP
@@ -186,6 +215,8 @@ class Wizard:
         self.completed = False
         self.choices = {}
         self._pull_queue = queue.Queue()
+        self._probe_queue = queue.Queue()
+        self._watch_job = None
 
         self.body = tk.Frame(self.root, bg=INK, padx=30, pady=26)
         self.body.pack(fill="both", expand=True)
@@ -418,24 +449,113 @@ class Wizard:
         except Exception:  # noqa: BLE001 - interpreter already gone
             return False
 
+    def _cancel_watch(self):
+        """Drop a pending automatic re-probe.
+
+        Called before every probe, so a user pressing *Check now* while the
+        timer is still pending ends up with one chain of callbacks rather than
+        two, each halving the interval of the last.
+        """
+        if self._watch_job is not None:
+            try:
+                self.root.after_cancel(self._watch_job)
+            except Exception:  # noqa: BLE001 - already fired, or window gone
+                pass
+            self._watch_job = None
+
     def _probe_ollama(self):
+        """Ask the server what it has, off the Tk thread.
+
+        This used to call ``ollama_models`` inline, which was fine when it
+        happened once on entering the step. It now also runs on a timer, and a
+        blocking 2.5-second call every four seconds would leave the window
+        unable to redraw for most of its life.
+        """
         if not self._alive(self.model_row):
             return
-        reachable, models = ollama_models(self.url.get())
+        self._cancel_watch()
+        url = self.url.get()
+
+        def worker():
+            self._probe_queue.put(ollama_models(url))
+
+        threading.Thread(target=worker, daemon=True).start()
+        self.root.after(120, self._drain_probe)
+
+    def _drain_probe(self):
+        """Tk is single-threaded: the worker probes, the main loop draws."""
         if not self._alive(self.model_row):
-            return          # the probe blocks for up to PROBE_TIMEOUT
+            return
+        try:
+            reachable, models = self._probe_queue.get_nowait()
+        except queue.Empty:
+            self.root.after(120, self._drain_probe)
+            return
+        self._show_ollama(reachable, models)
+
+    def _open_ollama_site(self):
+        import webbrowser
+
+        try:
+            webbrowser.open(OLLAMA_SITE)
+        except Exception:  # noqa: BLE001 - no browser, or no desktop session
+            print(f"Ollama: {OLLAMA_SITE}", flush=True)
+
+    def _open_summaries_guide(self):
+        """The shipped PDF that covers this entire step in full.
+
+        diagnostics is imported here rather than at module scope, as everywhere
+        else in the app: it pulls in platform and traceback, and setup does not
+        need either of them to draw a window.
+        """
+        try:
+            import diagnostics
+
+            diagnostics.open_doc("summaries")
+        except Exception as e:  # noqa: BLE001 - a help button must not throw
+            print(f"[setup] could not open the summaries guide: {e}", flush=True)
+
+    def _show_ollama(self, reachable, models):
+        """Draw the result of a probe."""
+        if not self._alive(self.model_row):
+            return
         for child in self.model_row.winfo_children():
             child.destroy()
 
         if not reachable:
             self.status.set(
                 "Ollama isn't running on this machine.\n\n"
-                "Everything else works: you'll get a full transcript of every "
-                "meeting. Only the written summary needs Ollama. Install it "
-                "from ollama.com, then come back here — Settings › Run setup "
-                "again.")
-            ttk.Button(self.model_row, text="Check again",
-                       command=self._probe_ollama).pack(side="left")
+                "Everything else works — you'll get a full transcript of "
+                "every meeting. Only the written summary needs Ollama.")
+            what, command = install_hint()
+            tk.Label(self.model_row, text=what, font=_BODY, bg=PANEL, fg=PAPER,
+                     wraplength=500, justify="left").pack(anchor="w")
+            if command:
+                tk.Label(self.model_row, text=command, font=_MONO, bg=PANEL,
+                         fg=AMBER, wraplength=500,
+                         justify="left").pack(anchor="w", pady=(4, 0))
+            tk.Label(self.model_row,
+                     text="Leave this window open. It notices by itself when "
+                          "Ollama starts, and carries on from there.",
+                     font=_BODY, bg=PANEL, fg=MUTED, wraplength=500,
+                     justify="left").pack(anchor="w", pady=(8, 0))
+
+            row = tk.Frame(self.model_row, bg=PANEL)
+            row.pack(anchor="w", pady=(10, 0))
+            ttk.Button(row, text="Open ollama.com",
+                       command=self._open_ollama_site).pack(side="left")
+            ttk.Button(row, text="Setup guide",
+                       command=self._open_summaries_guide).pack(
+                side="left", padx=(8, 0))
+            ttk.Button(row, text="Check now",
+                       command=self._probe_ollama).pack(side="left", padx=(8, 0))
+            ttk.Button(row, text="Skip",
+                       command=self._next).pack(side="left", padx=(8, 0))
+
+            # The whole reason this is no longer a dead end: installing Ollama
+            # happens in another window, and the user should not have to know
+            # to come back here and press anything when it is done.
+            self._watch_job = self.root.after(WATCH_EVERY, self._probe_ollama)
             return
 
         usable = [m for m in models if _base_name(m)]
