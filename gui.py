@@ -119,6 +119,85 @@ class App:
         self._show_language_warning()
         self._refresh_profile()
         threading.Thread(target=self._check_ollama, daemon=True).start()
+        self._start_remote_control()
+
+    # -- the hotkey and the second launch ------------------------------------
+    def _start_remote_control(self):
+        """Listen for the record hotkey, and for a second launch asking to
+        toggle.
+
+        Both arrive on threads that are not Tk's, so both go through the same
+        queue every background worker in this file already uses. Calling
+        ``_toggle_record`` directly from either would be a cross-thread Tk call
+        -- which does not raise, it corrupts.
+
+        Started after the widgets exist. A press that arrived before the record
+        button was built would find a handler referring to nothing.
+        """
+        import control
+        import hotkey as hotkey_mod
+
+        self._hotkey = None
+        self._control = None
+
+        self._hotkey_at = 0.0
+
+        def toggle_from_elsewhere():
+            self._ui_q.put(self._toggle_record)
+
+        self._control = control.Server({
+            control.TOGGLE: toggle_from_elsewhere,
+            control.START: lambda: self._ui_q.put(self._start_if_idle),
+            control.STOP: lambda: self._ui_q.put(self._stop_if_recording),
+        })
+        if not self._control.start():
+            # The app is entirely usable without it; only the second press of
+            # the hotkey suffers, and it degrades to opening a second window
+            # rather than to anything dangerous.
+            print(f"[control] {self._control.error}", flush=True)
+
+        if not getattr(config, "HOTKEY_ENABLED", True):
+            return
+
+        # The app is the only owner. An earlier version put the chord on a
+        # desktop shortcut as well, so the key would also work with the app
+        # closed -- and that could never have worked: Explorer binds a
+        # shortcut's hotkey the moment the file exists and holds it, so the
+        # app's own registration lost every time. One owner, and it is this
+        # one; the key works whenever the app is open or in the tray.
+        self._hotkey = hotkey_mod.start(config.HOTKEY, self._hotkey_pressed)
+        if self._hotkey.error:
+            # Said once, in the status bar, not in a dialog: a hotkey that
+            # could not be registered is a disappointment, not an emergency,
+            # and a modal on startup would be worse than the problem.
+            print(f"[hotkey] {self._hotkey.error}", flush=True)
+            self._ui_q.put(lambda: self.status_left.configure(
+                text=self._hotkey.error))
+
+    def _hotkey_pressed(self):
+        """A press arrived. Record that it did, then do the work.
+
+        The timestamp is the point. "Nothing happened" is the failure people
+        actually report, and from the outside a chord the OS never delivered
+        looks exactly like a chord the app ignored. Settings shows when the
+        last press landed, which separates the two without a support thread.
+        """
+        self._hotkey_at = time.monotonic()
+        self._ui_q.put(self._note_hotkey)
+        self._ui_q.put(self._toggle_record)
+
+    def _note_hotkey(self):
+        label = getattr(self, "hotkey_label", None)
+        if label is not None and label.winfo_exists():
+            self._show_hotkey_state()
+
+    def _start_if_idle(self):
+        if not self.engine.is_listening:
+            self._toggle_record()
+
+    def _stop_if_recording(self):
+        if self.engine.is_listening:
+            self._toggle_record()
 
     # -- theme ---------------------------------------------------------------
     def _style(self):
@@ -938,6 +1017,32 @@ class App:
         ttk.Label(auto, text="These need a connected account (Connections tab).",
                   style="Muted.TLabel").pack(anchor="w", pady=(8, 0))
 
+        keys = ttk.LabelFrame(parent, text="Record without leaving the meeting",
+                              style="Card.TLabelframe", padding=14)
+        keys.pack(fill="x", pady=(14, 0))
+        ttk.Label(keys, text="One key starts recording and transcribing, and "
+                             "the same key stops and saves \u2014 while the call, "
+                             "not this window, has focus. It works when the app "
+                             "is closed too: the shortcut starts it recording.",
+                  style="Muted.TLabel", wraplength=820,
+                  justify="left").pack(anchor="w")
+
+        row = ttk.Frame(keys)
+        row.pack(anchor="w", pady=(10, 0))
+        self.hotkey_on_var = tk.BooleanVar(
+            value=bool(current.get("HOTKEY_ENABLED", True)))
+        ttk.Checkbutton(row, text="Enabled", variable=self.hotkey_on_var,
+                        command=self._save_hotkey).pack(side="left")
+        self.hotkey_var = tk.StringVar(value=current.get("HOTKEY") or "")
+        ttk.Entry(row, textvariable=self.hotkey_var, width=22).pack(
+            side="left", padx=(12, 0))
+        ttk.Button(row, text="Apply", command=self._save_hotkey).pack(
+            side="left", padx=(6, 0))
+        self.hotkey_label = ttk.Label(keys, text="", style="Muted.TLabel",
+                                      wraplength=820, justify="left")
+        self.hotkey_label.pack(anchor="w", pady=(8, 0))
+        self._show_hotkey_state()
+
         speed = ttk.LabelFrame(parent, text="Performance",
                                style="Card.TLabelframe", padding=14)
         speed.pack(fill="x", pady=14)
@@ -1125,6 +1230,75 @@ class App:
         import diagnostics
 
         diagnostics.open_support()
+
+    def _show_hotkey_state(self):
+        """Say what the hotkey is doing, in the one place someone would look.
+
+        Three things worth distinguishing, because the fix differs for each:
+        switched off, a chord that cannot be registered, and a chord another
+        application already holds.
+        """
+        import hotkey as hotkey_mod
+
+        if not self.hotkey_on_var.get():
+            self.hotkey_label.configure(
+                text="Off. Recording still starts from the button above and "
+                     "from the tray.", style="Muted.TLabel")
+            return
+        handle = getattr(self, "_hotkey", None)
+        if handle is not None and handle.error:
+            self.hotkey_label.configure(text=handle.error, style="Bad.TLabel")
+            return
+        try:
+            chord = hotkey_mod.pretty(self.hotkey_var.get())
+            hotkey_mod.parse(self.hotkey_var.get())
+        except hotkey_mod.ChordError as e:
+            self.hotkey_label.configure(text=str(e), style="Bad.TLabel")
+            return
+        seen = getattr(self, "_hotkey_at", 0.0)
+        if seen:
+            ago = max(0, int(time.monotonic() - seen))
+            when = "just now" if ago < 3 else f"{ago}s ago"
+            note = f" \u2014 last pressed {when}."
+        else:
+            note = ". Press it to check it reaches the app."
+        self.hotkey_label.configure(
+            text=f"\u2713 {chord} starts and stops a recording{note}",
+            style="Good.TLabel")
+
+    def _save_hotkey(self):
+        """Save the chord and re-register it, without a restart.
+
+        Re-registering live is the whole reason ``Hotkey.stop`` releases the
+        chord: somebody trying to find a combination their machine has free
+        should be able to try three of them in ten seconds, not restart twice.
+        """
+        import hotkey as hotkey_mod
+
+        chord = self.hotkey_var.get().strip()
+        enabled = bool(self.hotkey_on_var.get())
+        if enabled and chord:
+            try:
+                hotkey_mod.parse(chord)
+            except hotkey_mod.ChordError as e:
+                # Refused before saving: a stored chord that cannot work would
+                # come back broken on the next launch with no clue why.
+                self.hotkey_label.configure(text=str(e), style="Bad.TLabel")
+                return
+
+        settings.save(HOTKEY=chord or config.HOTKEY, HOTKEY_ENABLED=enabled)
+        settings.apply()
+
+        handle = getattr(self, "_hotkey", None)
+        if handle is not None:
+            handle.stop()
+            self._hotkey = None
+        if enabled:
+            self._hotkey = hotkey_mod.start(config.HOTKEY,
+                                            self._hotkey_pressed)
+        self._hotkey_at = 0.0        # a new chord has not been pressed yet
+        self._show_hotkey_state()
+        self.status_left.configure(text="Hotkey saved.")
 
     def _toggle(self, key):
         settings.save(**{key: self.vars[key].get()})
@@ -1430,6 +1604,16 @@ class App:
             return
         self.status_left.configure(text="Saving and closing…")
         self.root.update_idletasks()
+        # Before the engine, so a hotkey pressed during a slow save cannot
+        # queue a toggle against an engine that is shutting down. Both are
+        # best-effort: neither may stand between the user and a closed window.
+        for name in ("_hotkey", "_control"):
+            handle = getattr(self, name, None)
+            if handle is not None:
+                try:
+                    handle.stop()
+                except Exception as e:  # noqa: BLE001
+                    print(f"[gui] {name}: {e}", flush=True)
         try:
             self.engine.shutdown()
         except Exception as e:  # noqa: BLE001 - never block the quit
@@ -1443,8 +1627,13 @@ class App:
         self.root.destroy()
 
 
-def run():
-    """Open the window. Returns when the user closes it."""
+def run(record_on_start: bool = False):
+    """Open the window. Returns when the user closes it.
+
+    ``record_on_start`` is the hotkey's cold-start path: the key was pressed
+    with nothing running, so the window opens and begins recording without
+    waiting to be asked twice.
+    """
     # The tip prompt is Core's own — it asks on behalf of the free product —
     # but it stays an ordinary hook, registered here rather than wired into
     # the close path, so deleting the module is all it takes to remove it.
@@ -1458,6 +1647,12 @@ def run():
 
     root = tk.Tk()
     app = App(root)
+    if record_on_start:
+        # after(), not a direct call: the window has not been drawn yet, and
+        # the engine's start path reports progress into widgets that do not
+        # exist until Tk has run once. The delay is what makes the hotkey feel
+        # like one action rather than a window that appears and then reacts.
+        root.after(120, app._start_if_idle)
     # Auto-record from the calendar if the user turned it on.
     if config.AUTO_START_FROM_CALENDAR:
         app.engine.start_scheduler(

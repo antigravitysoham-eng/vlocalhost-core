@@ -58,6 +58,12 @@ EDITABLE = (
     "CUSTOM_TRANSCRIBER",
     # How often the local, network-free update reminder fires. 0 turns it off.
     "UPDATE_REMINDER_DAYS",
+    # The system-wide key that starts and stops a recording, and its off
+    # switch. Editable because the right chord depends on what else the user
+    # runs -- a hotkey is taken from every other application on the machine,
+    # so this is not a setting we can pick correctly on their behalf forever.
+    "HOTKEY",
+    "HOTKEY_ENABLED",
 )
 
 

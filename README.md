@@ -264,6 +264,59 @@ The advanced knobs are in `config.py`:
 | `SILENCE_TIMEOUT_MS` | How long a pause ends an utterance (default 800 ms). |
 | `OLLAMA_MODEL` | Any model you've pulled, e.g. `llama3.1`, `mistral`, `qwen2.5`. |
 | `WHISPER_DEVICE` / `WHISPER_COMPUTE` | Set `cuda` / `float16` for GPU acceleration. |
+| `HOTKEY` | The system-wide key that starts and stops a recording. Default `ctrl+shift+space`. |
+| `HOTKEY_ENABLED` | Turn the hotkey off without forgetting the chord you chose. |
+
+### The record hotkey
+
+**Ctrl+Shift+Space starts recording and transcribing; pressing it again stops
+and saves.** It works while the call — not this window — has focus, which is
+the point: the first thirty seconds of a meeting is where people say what it is
+about, and that is exactly the time spent hunting for the window.
+
+The app owns the chord, so it works whenever Vlocalhost is open or in the tray.
+Settings shows when the key was last pressed, which is the difference between
+"the app ignored it" and "the OS never delivered it" — two failures that look
+identical from the outside.
+
+```bash
+python vlocalhost.py --record          # start, or stop if already recording
+python vlocalhost.py --set HOTKEY=ctrl+alt+r
+```
+
+`--record` finds a running copy over a loopback socket and toggles it, rather
+than opening a second window; if nothing is running it starts the app already
+recording. The socket is bound to `127.0.0.1` and paired with a random token in
+the per-user data directory, because an unauthenticated local port that opens a
+microphone would be a bad thing to ship.
+
+Any number of modifiers plus **exactly one** other key. Modifiers alone cannot
+be registered — `RegisterHotKey` needs a virtual-key code, so `ctrl+shift` is
+refused with an explanation rather than silently ignored — and a bare key would
+fire while you were typing.
+
+**Not a function key, and that is deliberate.** `Ctrl+Shift+F12` was the first
+default and it was a bad one: on most laptops the function row is media-locked,
+so pressing F12 without Fn sends volume or brightness and never produces an F12
+at all. The app listens correctly and nothing arrives. Automated tests cannot
+catch this — a synthesised keypress injects the virtual-key directly and sails
+straight past the Fn layer, so the test passes while a real finger does
+nothing. Space has no Fn layer anywhere.
+
+`Ctrl+Shift+R` was the other candidate and would have taken hard-reload from
+every browser: a system-wide hotkey outranks every application, so whatever
+this takes, nothing else can have.
+
+**Not a desktop shortcut, and that is also deliberate.** An earlier attempt put
+the chord on a `.lnk` as well, so it would work with the app closed. That can
+never work alongside an in-app hotkey: Explorer binds a shortcut's hotkey the
+moment the file exists and holds it, so the app's own registration loses every
+time. One owner, and it is the app.
+
+Windows only for now. macOS needs an Accessibility grant and Linux depends on
+the desktop, so both say so in Settings rather than failing quietly; recording
+still starts from the window and the tray everywhere.
+
 
 ## 9. Extending Core: calendar and email providers
 

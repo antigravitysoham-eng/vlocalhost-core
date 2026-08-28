@@ -10,6 +10,7 @@ different front end.
     python vlocalhost.py --mcp               # MCP server on stdio (for AI clients)
     python vlocalhost.py --devices            # list audio devices and capture support
     python vlocalhost.py --connect <account>  # link a calendar/mail account
+    python vlocalhost.py --record             # start recording now, or stop if already
     python vlocalhost.py --install-shortcut   # desktop/menu icon, double-click to run
     python vlocalhost.py --remove-shortcut    # take it away again
     python vlocalhost.py --diagnose           # write a report to send with a bug
@@ -158,7 +159,7 @@ def _result_text(result):
 # ---------------------------------------------------------------------------
 # Tray mode
 # ---------------------------------------------------------------------------
-def run_tray():
+def run_tray(record_on_start: bool = False):
     import pystray
     from PIL import Image, ImageDraw
 
@@ -261,12 +262,51 @@ def run_tray():
         pystray.MenuItem("Quit", quit_app),
     )
 
+    def toggle(_=None):
+        stop_and_save() if eng.is_listening else start_listening()
+
+    # Both handlers arrive on threads that are not pystray's, and both of the
+    # functions they call already hand their work to a thread of their own --
+    # so unlike the window, there is no event loop to marshal back onto.
+    import control
+    import hotkey as hotkey_mod
+
+    channel = control.Server({
+        control.TOGGLE: toggle,
+        control.START: start_listening,
+        control.STOP: stop_and_save,
+    })
+    if not channel.start():
+        print(f"[control] {channel.error}", flush=True)
+
+    key = None
+    if getattr(config, "HOTKEY_ENABLED", True):
+        key = hotkey_mod.start(config.HOTKEY, toggle)
+        if key.error:
+            print(f"[hotkey] {key.error}", flush=True)
+        else:
+            print(f"[hotkey] {hotkey_mod.pretty(config.HOTKEY)} "
+                  f"starts and stops a recording.", flush=True)
+
     if config.AUTO_START_FROM_CALENDAR and eng.start_scheduler():
         print("[calendar] auto-start enabled — watching your calendar.", flush=True)
 
     print("Vlocalhost.AI running in the system tray. "
           "Right-click the tray icon to start.", flush=True)
-    icon.run()
+    if record_on_start:
+        start_listening()
+    try:
+        icon.run()
+    finally:
+        # icon.run() returns when Quit is chosen. Releasing the chord matters:
+        # a registration outlives nothing but the process, and leaving the
+        # control file behind would make the next press wait for a dead port.
+        for handle in (key, channel):
+            if handle is not None:
+                try:
+                    handle.stop()
+                except Exception as e:  # noqa: BLE001 - already quitting
+                    print(f"[tray] {e}", flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +409,17 @@ def main(argv):
     settings.apply()
     # Before anything opens a window or writes a note: rescue anything an
     # older version left inside an application folder.
+    # The hotkey's press path, and the first thing that runs. Every press
+    # arrives as a brand-new process -- that is how a shortcut hotkey works --
+    # so everything between the keypress and the toggle is latency the user
+    # feels. Nothing heavy may go above this line.
+    if "--record" in argv:
+        import control
+
+        if control.send(control.TOGGLE):
+            return 0                # a copy was running; it has the message
+        argv = [a for a in argv if a != "--record"] + ["--record-on-start"]
+
     migrate.run(quiet="--mcp" in argv)
 
     if "--diagnose" in argv:
@@ -413,12 +464,22 @@ def main(argv):
         setup_wizard.run()
         return 0
 
+    # The hotkey's cold-start path. Windows fires the shortcut's hotkey by
+    # launching it, so every press arrives here as a new process -- and the
+    # second press must reach the copy the first one started rather than open
+    # another window with another microphone open.
+    #
+    # Handled before the setup wizard on purpose: somebody who has been through
+    # setup and is now pressing a key mid-meeting must not be shown a wizard,
+    # and somebody who has not is better served by the window than by a
+    # recording started behind it.
+
     # First run, and a window is what they're getting: ask the setup questions
     # before the app opens. Skipped for the tray, the terminal and MCP, which
     # are either headless or driven by something that can't answer.
     if not any(f in argv for f in ("--tray", "--no-tray", "--mcp",
                                    "--devices", "--connect", "--actions",
-                                   "--do")):
+                                   "--do", "--record-on-start")):
         import setup_wizard
 
         if setup_wizard.needed():
@@ -459,12 +520,12 @@ def main(argv):
     elif "--no-tray" in argv:
         run_cli()
     elif "--tray" in argv:
-        run_tray()
+        run_tray(record_on_start="--record-on-start" in argv)
     else:
         try:
             import gui
 
-            gui.run()
+            gui.run(record_on_start="--record-on-start" in argv)
         except Exception as e:  # noqa: BLE001 - no display, no Tk, etc.
             print(f"Window unavailable ({e}); falling back to the tray.\n",
                   flush=True)

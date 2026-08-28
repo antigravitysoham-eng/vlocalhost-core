@@ -232,3 +232,31 @@ UPDATE_API_URL = ("https://api.github.com/repos/"
                   "antigravitysoham-eng/vlocalhost-core/releases/latest")
 UPDATE_RELEASES_URL = ("https://github.com/"
                        "antigravitysoham-eng/vlocalhost-core/releases/latest")
+
+# --- The record hotkey ---------------------------------------------------
+# One key that starts and stops a recording while another window has focus,
+# because the first thirty seconds of a meeting is where people say what it is
+# about, and that is exactly the time spent finding the window.
+#
+# Any number of modifiers plus exactly one real key. Modifiers on their own
+# cannot be registered -- Windows needs a virtual-key code as well -- and a
+# bare key would fire while you were typing, so both are refused with an
+# explanation rather than silently ignored.
+#
+# Not a function key, and that is the whole lesson of the first attempt. F12
+# looked ideal -- almost nothing is bound to Ctrl+Shift+F12 -- and it fails for
+# a reason no amount of software testing finds: on most laptops the function
+# row is media-locked, so pressing F12 without Fn sends volume or brightness
+# and never produces an F12 at all. The app listens correctly and nothing
+# arrives. A synthetic keypress injects the virtual-key directly and sails
+# straight past the Fn layer, so the tests pass while the user's finger does
+# nothing.
+#
+# Space has no Fn layer anywhere, is unmissable by touch, and Ctrl+Shift+Space
+# is bound globally by very little. Ctrl+Shift+R was the other candidate and
+# would have taken hard-reload from every browser -- a system-wide hotkey
+# outranks every application, so whatever this takes, nothing else can have.
+HOTKEY = "ctrl+shift+space"
+
+# Turn the hotkey off without clearing the chord you chose.
+HOTKEY_ENABLED = True
