@@ -64,6 +64,11 @@ EDITABLE = (
     # so this is not a setting we can pick correctly on their behalf forever.
     "HOTKEY",
     "HOTKEY_ENABLED",
+    # Refuse every outbound connection. Editable, and deliberately so: an
+    # administrator setting this across a fleet is the whole point of it, and
+    # a setting that can only be reached by editing config.py is reverted by
+    # the next update.
+    "SEALED_MODE",
 )
 
 

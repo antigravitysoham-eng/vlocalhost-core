@@ -96,10 +96,24 @@ def get_provider(name: Optional[str]) -> Optional[CalendarProvider]:
     None/'none' means "stay local" and is not an error. An unknown name raises
     ValueError; a known provider whose packages are missing raises RuntimeError
     with the install command.
+
+    A sealed install has no providers, whatever is installed. Every calendar
+    read and every emailed note passes through this one function, so this is
+    where sealing has to hold: blocking here means a paid package cannot reach
+    the network even by accident, and the guarantee never depends on each
+    provider remembering to check for itself.
     """
     _ensure_plugins_loaded()
     if not name or name.lower() == "none":
         return None
+
+    # Imported inside the function, not at module scope: ``network`` reads
+    # ``integrations.store``, and a top-level import would close that circle
+    # while this package is still being created.
+    import network
+
+    if network.sealed():
+        raise network.refuse("calendar")
 
     key = name.lower()
     entry = _REGISTRY.get(key)

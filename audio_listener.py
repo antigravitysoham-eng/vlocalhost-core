@@ -690,6 +690,19 @@ class MultiListener:
         self.listeners = listeners
 
     def start(self):
+        """Open each source in turn.
+
+        Deliberately sequential. Opening the microphone and the WASAPI loopback
+        on parallel threads saves about 180 ms, and costs system audio
+        entirely: COM is per-thread, `soundcard` initialises it itself in the
+        thread it runs on, and a second CoInitializeEx from a worker thread
+        conflicts with it -- measured as 0x800401f0 and then 0x100000001, with
+        the loopback dropping out of the recording and only the microphone
+        surviving. Losing the other half of a meeting is not worth 180 ms.
+
+        The latency that mattered was never here; it was the speech model
+        loading before the microphone opened. See NoteTaker.start.
+        """
         started = []
         for listener in self.listeners:
             try:
@@ -697,7 +710,7 @@ class MultiListener:
                 started.append(listener)
             except Exception as e:  # noqa: BLE001
                 # One source failing (no loopback device, say) must not take the
-                # meeting down — record what we can and say what we lost.
+                # meeting down -- record what we can and say what we lost.
                 print(f"[audio] {listener.kind} unavailable: {e}", flush=True)
         if not started:
             raise RuntimeError("No audio source could be opened.")

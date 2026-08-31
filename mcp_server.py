@@ -32,13 +32,14 @@ sys.stdout = sys.stderr
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config          # noqa: E402
+import mcp_protocol    # noqa: E402
 import engine as engine_mod  # noqa: E402
 import settings        # noqa: E402
 
 SERVER_NAME = "vlocalhost"
-SERVER_VERSION = "1.0.0"
-PROTOCOL_VERSION = "2025-06-18"
-SUPPORTED_PROTOCOLS = {"2024-11-05", "2025-03-26", "2025-06-18"}
+SERVER_VERSION = "1.1.0"
+PROTOCOL_VERSION = mcp_protocol.LATEST
+SUPPORTED_PROTOCOLS = set(mcp_protocol.VERSIONS)
 
 _engine = None
 _engine_lock = threading.Lock()
@@ -134,10 +135,39 @@ def tool_list_notes(limit=20):
     items = get_engine().list_notes(limit=int(limit))
     if not items:
         return "No saved meetings yet."
-    return _text(*[f"{i['modified']}  {i['kind']:<10}  {i['name']}" for i in items])
+
+    import mcp_policy
+
+    hidden = 0
+    if mcp_policy.enabled():
+        kept = mcp_policy.filter_notes(items)
+        hidden = len(items) - len(kept)
+        items = kept
+
+    rows = [f"{i['modified']}  {i['kind']:<10}  {i['name']}" for i in items]
+    if hidden:
+        # Said out loud, because a list that silently shrank would let an
+        # assistant answer from half an archive and sound certain about it.
+        rows.append(f"({hidden} older meeting(s) withheld -- "
+                    + mcp_policy.describe() + ")")
+    if not rows:
+        return ("Every saved meeting is outside the window assistants may "
+                "read. " + mcp_policy.describe())
+    return _text(*rows)
+
+
+def _scope_check(name, path=""):
+    """None if allowed, otherwise the refusal to return instead of content."""
+    import mcp_policy
+
+    ok, reason = mcp_policy.allows(name, path)
+    return None if ok else "Refused: " + name + chr(10) + reason
 
 
 def tool_read_note(name):
+    refusal = _scope_check(name)
+    if refusal:
+        return refusal
     return get_engine().read_note(name)
 
 
@@ -183,7 +213,10 @@ def tool_email_notes(note, to, subject=None):
 def tool_connection_status():
     from integrations import available_providers, get_provider
 
-    lines = [f"App is using: {config.CALENDAR_PROVIDER or 'no account (local only)'}"]
+    import mcp_policy
+
+    lines = [f"App is using: {config.CALENDAR_PROVIDER or 'no account (local only)'}",
+             mcp_policy.describe()]
     names = available_providers()
     if not names:
         lines.append("No calendar/email providers are installed — this build "
@@ -319,6 +352,15 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
         "handler": tool_connection_status,
     },
+    {
+        "name": "mcp_access_log",
+        "description": "What has read your meetings through MCP: which client, "
+                       "which tool, when. Local only, never sent anywhere.",
+        "inputSchema": {"type": "object", "properties": {
+            "limit": {"type": "integer",
+                      "description": "How many recent entries (default 50)."}}},
+        "handler": lambda limit=50: __import__("mcp_audit").summary(limit),
+    },
 ]
 
 def _action_tools():
@@ -360,8 +402,32 @@ def _action_tools():
     return tools
 
 
-TOOLS += _action_tools()
+def _registered_tools():
+    """Tools an extension registered with its own schema.
 
+    The companion to :func:`_action_tools`. An action is "do this to one saved
+    meeting" and needs no schema beyond a note name; anything that asks a
+    question across meetings, or takes arguments of its own, arrives here
+    instead. Core still names none of them -- see :mod:`mcp_tools`.
+    """
+    import mcp_tools
+    from plugins import load
+
+    load()  # extensions register on first ask, not at import time
+    tools = []
+    for entry in mcp_tools.available_tools():
+        tools.append({
+            "name": entry.name,
+            "description": entry.description,
+            "inputSchema": entry.input_schema,
+            "handler": entry.run,
+        })
+    return tools
+
+
+TOOLS += _action_tools()
+TOOLS += _registered_tools()
+TOOLS.sort(key=lambda t: t["name"])
 _BY_NAME = {t["name"]: t for t in TOOLS}
 
 
@@ -373,28 +439,81 @@ def _send(message):
     _PROTOCOL_OUT.flush()
 
 
-def _result(request_id, payload):
-    _send({"jsonrpc": "2.0", "id": request_id, "result": payload})
+def _result(request_id, payload, version=None):
+    """Reply, shaped for whichever revision the request was speaking."""
+    body = mcp_protocol.shape(payload, version or _session["version"])
+    _send({"jsonrpc": "2.0", "id": request_id, "result": body})
 
 
-def _error(request_id, code, message):
-    _send({"jsonrpc": "2.0", "id": request_id,
-           "error": {"code": code, "message": message}})
+def _error(request_id, code, message, data=None):
+    body = {"code": code, "message": message}
+    if data is not None:
+        body["data"] = data
+    _send({"jsonrpc": "2.0", "id": request_id, "error": body})
+
+
+#: What a client agreed to at ``initialize``. At 2026-07-28 there is no
+#: handshake and every request carries its own version, so this is only ever
+#: consulted for clients still using the old lifecycle.
+_session = {"version": mcp_protocol.FLOOR, "client": {}}
+
+
+def _capabilities():
+    """What this server can do. Resources and prompts are always declared:
+    an empty list is a valid answer and is what a core-only build gives for
+    prompts, whereas withholding the capability would stop a client asking at
+    all."""
+    return {
+        "tools": {"listChanged": False},
+        "resources": {},
+        "prompts": {"listChanged": False},
+    }
+
+
+INSTRUCTIONS = (
+    "Vlocalhost.AI records and transcribes meetings entirely on this machine. "
+    "Use start_recording / stop_recording to run a session, live_transcript to "
+    "follow along, and search_notes / read_note to look back. Meetings are also "
+    "available as resources under vlocalhost://meeting/... — prefer attaching "
+    "one of those over calling a tool to fetch text. email_notes is the only "
+    "tool that sends anything off this device: always confirm recipients first."
+)
+
+
+def handle_discover(params, version):
+    """``server/discover`` — mandatory at 2026-07-28, harmless before it.
+
+    Replaces the ``initialize`` handshake. A client may call it up front to
+    pick a version, or use it on stdio as a probe to find out whether the
+    server is new enough to talk to statelessly.
+    """
+    return {
+        "protocolVersions": list(mcp_protocol.VERSIONS),
+        "capabilities": _capabilities(),
+        "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
+        "instructions": INSTRUCTIONS,
+    }
 
 
 def handle_initialize(params):
+    """The pre-2026-07-28 handshake. Kept because it is what shipped clients use.
+
+    Claude Desktop, Claude Code and Cursor all speak 2025-06-18 today. Dropping
+    this in favour of the new lifecycle would be standards-compliant and would
+    disconnect every user, which is not a trade worth making until the clients
+    move.
+    """
     asked = params.get("protocolVersion")
+    agreed = asked if mcp_protocol.is_known(asked) else mcp_protocol.LATEST
+    _session["version"] = agreed
+    info = params.get("clientInfo")
+    if isinstance(info, dict):
+        _session["client"] = info
     return {
-        "protocolVersion": asked if asked in SUPPORTED_PROTOCOLS else PROTOCOL_VERSION,
-        "capabilities": {"tools": {"listChanged": False}},
+        "protocolVersion": agreed,
+        "capabilities": _capabilities(),
         "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
-        "instructions": (
-            "Vlocalhost.AI records and transcribes meetings entirely on this "
-            "machine. Use start_recording / stop_recording to run a session, "
-            "live_transcript to follow along, and search_notes / read_note to "
-            "look back at past meetings. email_notes is the only tool that "
-            "sends anything off the device — always confirm recipients first."
-        ),
+        "instructions": INSTRUCTIONS,
     }
 
 
@@ -416,6 +535,47 @@ def handle_tools_call(params):
             "isError": is_error}
 
 
+def handle_prompts_get(params):
+    """Build one prompt. Raises LookupError for a name we do not have."""
+    import mcp_prompts
+
+    name = params.get("name")
+    prompt = mcp_prompts.get_prompt(name)
+    if prompt is None:
+        raise LookupError(f"Unknown prompt: {name}")
+    arguments = params.get("arguments") or {}
+    built = prompt.build(**arguments)
+    return {"description": prompt.description or prompt.title or prompt.name,
+            "messages": mcp_prompts.as_messages(built)}
+
+
+def _first_argument(params):
+    """A short, non-secret hint of what a call was about, for the log.
+
+    The first string argument only. Logging every argument would put transcript
+    text into a second file, which is the opposite of the point.
+    """
+    arguments = params.get("arguments") or {}
+    for value in arguments.values():
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:80]
+    return ""
+
+
+def _audit(kind, name, message, detail="", allowed=True):
+    """Record an access, if it is the kind worth recording. Never raises."""
+    try:
+        import mcp_audit
+
+        if kind == "tool" and name not in mcp_audit.CONTENT_TOOLS:
+            return
+        client = mcp_protocol.client_info(message) or _session["client"]
+        mcp_audit.record(kind, name or "", client=client, detail=detail,
+                         allowed=allowed)
+    except Exception:  # noqa: BLE001 - bookkeeping never breaks an answer
+        pass
+
+
 def dispatch(message):
     """Handle one JSON-RPC message. Returns nothing; replies are written out."""
     request_id = message.get("id")
@@ -426,21 +586,84 @@ def dispatch(message):
     if request_id is None:
         return
 
-    if method == "initialize":
-        _result(request_id, handle_initialize(params))
-    elif method == "ping":
-        _result(request_id, {})
-    elif method == "tools/list":
-        _result(request_id, {"tools": [
-            {k: v for k, v in tool.items() if k != "handler"} for tool in TOOLS]})
-    elif method == "tools/call":
-        _result(request_id, handle_tools_call(params))
-    elif method in ("resources/list", "resources/templates/list"):
-        _result(request_id, {"resources": [], "resourceTemplates": []})
-    elif method == "prompts/list":
-        _result(request_id, {"prompts": []})
-    else:
-        _error(request_id, -32601, f"Method not found: {method}")
+    version = mcp_protocol.request_version(message, _session["version"])
+    if not mcp_protocol.is_known(version):
+        _error(request_id, mcp_protocol.UNSUPPORTED_PROTOCOL_VERSION,
+               f"Unsupported protocol version: {version}",
+               {"supported": list(mcp_protocol.VERSIONS)})
+        return
+
+    # Cache hints are per-list and deliberately short. A tool list is stable
+    # within a run; a meeting list is not, because a recording finishing changes
+    # it. Both are "private": nothing derived from somebody's meetings should
+    # sit in a shared intermediary.
+    def listing(payload, ttl_ms):
+        return mcp_protocol.cacheable(payload, version, ttl_ms=ttl_ms,
+                                      scope="private")
+
+    try:
+        if method == "server/discover":
+            _result(request_id, handle_discover(params, version), version)
+        elif method == "initialize":
+            _result(request_id, handle_initialize(params), version)
+        elif method == "ping":
+            # Removed at 2026-07-28, answered anyway. It costs nothing and an
+            # older client that pings and gets an error concludes the server
+            # is broken.
+            _result(request_id, {}, version)
+        elif method == "tools/list":
+            _result(request_id, listing({"tools": [
+                {k: v for k, v in tool.items() if k != "handler"}
+                for tool in TOOLS]}, 600_000), version)
+        elif method == "tools/call":
+            _audit("tool", params.get("name"), message,
+                   detail=_first_argument(params))
+            _result(request_id, handle_tools_call(params), version)
+        elif method == "resources/list":
+            import mcp_resources
+
+            _result(request_id,
+                    listing({"resources": mcp_resources.list_resources()},
+                            60_000), version)
+        elif method == "resources/templates/list":
+            import mcp_resources
+
+            _result(request_id,
+                    listing({"resourceTemplates": mcp_resources.list_templates()},
+                            600_000), version)
+        elif method == "resources/read":
+            import mcp_resources
+
+            uri = params.get("uri")
+            found = mcp_resources.read(uri)
+            _audit("resource", uri or "", message, allowed=found is not None)
+            if found is None:
+                # -32602 at 2026-07-28, and clients are told to accept the old
+                # -32002 too. An empty contents array is explicitly forbidden
+                # here: it cannot be told apart from a resource that exists and
+                # happens to be empty.
+                _error(request_id, mcp_protocol.INVALID_PARAMS,
+                       "Resource not found", {"uri": uri})
+            else:
+                _result(request_id,
+                        listing({"contents": [found]}, 60_000), version)
+        elif method == "prompts/list":
+            import mcp_prompts
+
+            _result(request_id, listing({"prompts": [
+                p.to_dict() for p in mcp_prompts.available_prompts()]},
+                600_000), version)
+        elif method == "prompts/get":
+            _result(request_id, handle_prompts_get(params), version)
+        else:
+            _error(request_id, mcp_protocol.METHOD_NOT_FOUND,
+                   f"Method not found: {method}")
+    except LookupError as e:
+        _error(request_id, mcp_protocol.INVALID_PARAMS, str(e))
+    except TypeError as e:
+        _error(request_id, mcp_protocol.INVALID_PARAMS, str(e))
+    except Exception as e:  # noqa: BLE001 - a bad request must not end the session
+        _error(request_id, mcp_protocol.INTERNAL_ERROR, f"{method} failed: {e}")
 
 
 def main():

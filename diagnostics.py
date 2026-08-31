@@ -135,6 +135,22 @@ def _ollama_state() -> str:
         return f"not reachable ({type(e).__name__})"
 
 
+def _network_state() -> str:
+    """Sealed or not, and whether the contract still matches the code.
+
+    Worth a line in every report: a sealed install refusing to reach a calendar
+    is working correctly, and without this the ticket reads as a bug.
+    """
+    try:
+        import network
+
+        state = network.summary()
+        findings = network.audit()
+        return state if not findings else f"{state} CONTRACT CHECK FAILED"
+    except Exception as e:  # noqa: BLE001
+        return f"unknown ({type(e).__name__})"
+
+
 def _settings_summary() -> str:
     try:
         import config
@@ -182,6 +198,7 @@ def build_report(error: str = "") -> str:
         f"python        {platform.python_version()} ({platform.architecture()[0]})",
         f"os            {platform.system()} {platform.release()} ({platform.machine()})",
         f"ollama        {_ollama_state()}",
+        f"network       {_network_state()}",
         "",
         "Settings",
         _settings_summary(),

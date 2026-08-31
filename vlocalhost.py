@@ -17,6 +17,7 @@ different front end.
     python vlocalhost.py --get                # list every setting you can change
     python vlocalhost.py --set OLLAMA_MODEL=mistral   # change one (or several)
     python vlocalhost.py --paths              # where notes, settings and models live
+    python vlocalhost.py --network            # every connection this app can make
     python vlocalhost.py --actions            # what can be done with a saved meeting
     python vlocalhost.py --do <action>        # run one against the newest meeting
 
@@ -366,6 +367,19 @@ def run_paths():
     return 0
 
 
+def run_network():
+    """``--network`` — the whole outbound contract, and whether it is sealed.
+
+    Printed rather than linked because the point of it is that somebody can
+    check the claim on the machine in front of them, without a browser and
+    without trusting a page we control.
+    """
+    import network
+
+    print(network.report(), flush=True)
+    return 0
+
+
 # ---------------------------------------------------------------------------
 def run_check_updates():
     """`--check-updates`: the CLI half of the button. One GET, then it stops.
@@ -373,11 +387,19 @@ def run_check_updates():
     This is the only path in the application that contacts anything other than
     a local model, and it exists only because a human typed it.
     """
+    import network
     import updates
 
     print(f"Installed: {updates.current()}")
     try:
         result = updates.check_now()
+    except network.Sealed as exc:
+        # Sealed is a choice, not a failure, so it exits zero and says which
+        # of the two it is. Silence here would look like a bug in the thing
+        # whose whole job is to be inspectable.
+        print(exc)
+        print(f"Check by hand: {config.UPDATE_RELEASES_URL}")
+        return 0
     except updates.CheckFailed as exc:
         # Offline is not an error worth a non-zero exit. Nothing is broken; the
         # question simply could not be answered right now.
@@ -436,6 +458,9 @@ def main(argv):
 
     if "--paths" in argv:
         return run_paths()
+
+    if "--network" in argv:
+        return run_network()
 
     if "--check-updates" in argv:
         return run_check_updates()

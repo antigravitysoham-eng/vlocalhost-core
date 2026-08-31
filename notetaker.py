@@ -7,6 +7,7 @@ live transcript. Used by both the tray app (app.py) and the CLI (--no-tray).
 import os
 import queue
 import re
+import sys
 import threading
 import time
 from datetime import datetime
@@ -106,10 +107,30 @@ class NoteTaker:
 
     # -- lifecycle ------------------------------------------------------------
     def start(self):
+        """Open the microphone now; build the speech model alongside it.
+
+        The order here is the whole of the start latency. Loading the model
+        first meant the microphone did not open until it finished -- 0.5 to 2
+        seconds on a warm cache and several on a cold one, every time, because
+        the model is released while idle. Nothing about capturing audio needs a
+        neural network, so it no longer waits for one.
+
+        What still happens up front is the *check*: an English-only model asked
+        for another language is refused before recording starts, because that
+        is a mistake the user can fix and a recording made under it is wasted.
+
+        The queue between the two is unbounded, so audio captured while the
+        model is still building is transcribed when it arrives rather than
+        dropped. The first line appears at the same moment it always did; the
+        difference is that the meeting is now being recorded while you wait for
+        it.
+        """
         if self.listening:
             return
-        if hasattr(self.transcriber, "load"):
-            self.transcriber.load()  # warm up the model before the mic opens (optional)
+        precheck = getattr(self.transcriber, "precheck", None)
+        if callable(precheck):
+            precheck()  # cheap, and raises before anything is recorded
+
         with self._lock:
             self._transcript = []
         self._dirty = False
@@ -117,6 +138,30 @@ class NoteTaker:
         self._worker = threading.Thread(target=self._transcribe_loop, daemon=True)
         self._worker.start()
         self.listener.start()
+        self._warm_model()
+
+    def _warm_model(self):
+        """Build the speech model on a background thread, if it has one.
+
+        A failure here cannot be raised at the caller -- recording has already
+        started by the time it happens -- so it is written into the transcript
+        itself. That is where somebody looking for their missing text will
+        actually be looking, and an empty transcript with no explanation is the
+        worse outcome.
+        """
+        load = getattr(self.transcriber, "load", None)
+        if not callable(load):
+            return
+
+        def warm():
+            try:
+                load()
+            except Exception as e:  # noqa: BLE001 - never kill the recording
+                print(f"[model] could not load: {e}", file=sys.stderr, flush=True)
+                self.on_line(f"[model] could not load: {e} "
+                             f"-- audio is still being recorded and saved.")
+
+        threading.Thread(target=warm, daemon=True).start()
 
     def stop(self):
         """Stop listening. Returns the full transcript text."""

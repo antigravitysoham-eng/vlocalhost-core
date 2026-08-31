@@ -166,8 +166,20 @@ def pull_model(name: str, url: str, progress) -> str:
 
     ``progress`` is called with (fraction, status text); fraction is None while
     the server is doing something it cannot measure.
+
+    A sealed install refuses. The request itself is loopback -- it goes to
+    Ollama on this machine -- but Ollama answers it by downloading from its own
+    registry, so allowing it while sealed would mean causing an internet
+    connection the app had promised not to make. Proxying a download through
+    another process does not make it a local operation, and the whole value of
+    the switch is that it does not have that kind of exception.
     """
     import requests
+
+    import network
+
+    if not network.allowed("note_model_pull"):
+        return str(network.refuse("note_model_pull"))
 
     base = (url or getattr(config, "OLLAMA_URL", "")).rstrip("/")
     try:

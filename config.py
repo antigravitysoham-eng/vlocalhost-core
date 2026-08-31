@@ -233,6 +233,26 @@ UPDATE_API_URL = ("https://api.github.com/repos/"
 UPDATE_RELEASES_URL = ("https://github.com/"
                        "antigravitysoham-eng/vlocalhost-core/releases/latest")
 
+# --- Sealed Mode ----------------------------------------------------------
+# Refuse every outbound connection this app is capable of making.
+#
+# Nothing here is needed to record, transcribe or write notes: all three
+# already happen on this machine. What sealing removes is the small number of
+# optional calls that remain -- the update check, a first-run model download,
+# and the calendar and email integrations a paid package adds. See
+# :mod:`network` for the full list, which is the same list the app prints when
+# you ask it.
+#
+# It exists because "we do not upload your meetings" is a sentence somebody
+# else has to believe. Sealed, that claim stops being a statement of intent and
+# becomes a property of the install, testable by pulling the network cable and
+# carrying on working. An administrator can set it once across a fleet; a
+# hospital or a bank can set it and stop asking.
+#
+# Off by default: most people want the update check, and the speech model has
+# to arrive somehow the first time.
+SEALED_MODE = False
+
 # --- The record hotkey ---------------------------------------------------
 # One key that starts and stops a recording while another window has focus,
 # because the first thirty seconds of a meeting is where people say what it is

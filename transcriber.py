@@ -16,6 +16,7 @@ import numpy as np
 
 import config
 import languages
+import network
 
 # Common single-word hallucinations Whisper emits on near-silent/noise audio.
 # Whisper does this in other languages too — these are the frequent ones.
@@ -55,6 +56,53 @@ def _load_custom(spec):
     return obj() if callable(obj) else obj
 
 
+def _build_model(name):
+    """Construct a faster-whisper model, honouring Sealed Mode.
+
+    ``WhisperModel`` reaches huggingface.co for anything it cannot find on
+    disk. That is the right default, and it is also the one download a sealed
+    install must not perform.
+
+    So the local copy is always tried first, with ``local_files_only``. The
+    ordinary case — a model already downloaded — is then provably offline, and
+    the timestamp the network report shows is a real one: it moves when a file
+    is actually fetched and never when a cached model is simply loaded. A
+    "last used: never" that quietly meant "loaded from cache this morning"
+    would be worse than showing nothing at all.
+
+    Only if the model is genuinely absent does this fall through to a fetch,
+    and on a sealed install it does not fall through: the library's own message
+    talks about repositories and offline flags, while the person reading it set
+    a switch called Sealed Mode, so it is replaced with one that names the
+    cause and both ways out.
+    """
+    from faster_whisper import WhisperModel
+
+    def build(local_only):
+        return WhisperModel(
+            name,
+            device=config.WHISPER_DEVICE,
+            compute_type=config.WHISPER_COMPUTE,
+            cpu_threads=getattr(config, "WHISPER_CPU_THREADS", 0),
+            local_files_only=local_only,
+        )
+
+    try:
+        return build(True)
+    except Exception as exc:
+        if not network.allowed("model_download"):
+            raise RuntimeError(
+                f"The speech model {name!r} is not on this machine, and this "
+                f"install is sealed so it cannot be downloaded. Either point "
+                f"WHISPER_MODEL at a model folder you already have, or turn "
+                f"off Sealed Mode long enough to fetch it once."
+            ) from exc
+
+    model = build(False)
+    network.record("model_download")
+    return model
+
+
 class FasterWhisperTranscriber:
     """The built-in engine. Loads a faster-whisper model (by name or local path)
     once and reuses it for every utterance.
@@ -73,24 +121,32 @@ class FasterWhisperTranscriber:
         self.last_language = None       # ISO code detected for the last utterance
         self.last_language_prob = 0.0   # how sure Whisper was (0-1)
 
+    def precheck(self):
+        """Validate the model/language pairing. Cheap: a string comparison.
+
+        Split out of :meth:`load` so the recorder can refuse an impossible
+        combination *before* it opens the microphone, while still building the
+        model in the background. Loading is what costs seconds; this costs
+        nothing, and it is the failure a user can actually do something about.
+        """
+        warning = languages.check(config.WHISPER_MODEL, config.WHISPER_LANGUAGE)
+        if warning:
+            raise RuntimeError(warning)
+
     def load(self):
-        """Load the model. Call once up front so the first utterance isn't slow."""
+        """Load the model. Expensive, and deliberately not on the start path.
+
+        Measured on a mid-range Windows laptop, every single time the recorder
+        starts, because RELEASE_MODEL_WHEN_IDLE hands the memory back between
+        sessions: 0.5 s for tiny, 0.8 s for base, 2.1 s for small. That used to
+        run before the microphone opened, which is the whole reason pressing
+        Record felt slow. NoteTaker.start now warms it on a background thread
+        while audio is already being captured.
+        """
         if self._model is None:
-            from faster_whisper import WhisperModel
-
-            warning = languages.check(config.WHISPER_MODEL,
-                                      config.WHISPER_LANGUAGE)
-            if warning:
-                # Refuse rather than transcribe nonsense — see languages.check.
-                raise RuntimeError(warning)
-
+            self.precheck()
             # WHISPER_MODEL may be a name, a HF repo id, or a local model folder.
-            self._model = WhisperModel(
-                config.WHISPER_MODEL,
-                device=config.WHISPER_DEVICE,
-                compute_type=config.WHISPER_COMPUTE,
-                cpu_threads=getattr(config, "WHISPER_CPU_THREADS", 0),
-            )
+            self._model = _build_model(config.WHISPER_MODEL)
         return self._model
 
     def load_partial(self):
@@ -112,14 +168,7 @@ class FasterWhisperTranscriber:
         if not wanted or wanted == config.WHISPER_MODEL:
             return self.load()
         if self._partial_model is None:
-            from faster_whisper import WhisperModel
-
-            self._partial_model = WhisperModel(
-                wanted,
-                device=config.WHISPER_DEVICE,
-                compute_type=config.WHISPER_COMPUTE,
-                cpu_threads=getattr(config, "WHISPER_CPU_THREADS", 0),
-            )
+            self._partial_model = _build_model(wanted)
         return self._partial_model
 
     def unload(self):

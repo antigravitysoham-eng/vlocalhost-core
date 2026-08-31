@@ -38,6 +38,12 @@ PAPER = "#EAEEF4"
 MUTED = "#7E8AA0"
 DANGER = "#E8624F"
 
+#: Returned by the update worker when the install is sealed, so the result
+#: handler can tell "you switched this off" apart from "we could not reach it".
+#: A sentinel object rather than a string, because the third possible result is
+#: a dict and any stand-in value could one day collide with a real one.
+_SEALED = object()
+
 #: Callables run just before the window is destroyed, in registration order.
 #: Core registers one of its own (the tip prompt, in :func:`run`); optional
 #: packages add theirs from their ``register()``.
@@ -58,6 +64,29 @@ def register_exit_hook(hook):
     from ``register()``.
     """
     _exit_hooks.append(hook)
+
+
+_extra_tabs = []
+
+
+def register_tab(title, build):
+    """Add a tab to the window. Called by an installed package's register().
+
+    ``build(app, frame)`` fills it. Core supplies the notebook and nothing else:
+    it does not know what the tab is for, and a build with nothing installed
+    shows the three tabs it has always had.
+
+    This is the same rule as every other registry here. A screen that exists to
+    set up a paid capability is part of that capability, not part of the
+    recorder -- and putting it in Core would mean the free build carrying a
+    shopfront for something it does not have.
+    """
+    _extra_tabs.append((title, build))
+
+
+def extra_tabs():
+    """Registered tabs, in registration order. Empty in a core-only build."""
+    return list(_extra_tabs)
 
 
 MONO = ("Cascadia Code", 9) if platform.system() == "Windows" else ("Menlo", 11)
@@ -298,6 +327,17 @@ class App:
         self.check_btn.pack(anchor="e")
 
     def _tabs(self):
+        # Give installed packages their chance to register before the
+        # notebook is built. Everything else in here loads them as a side
+        # effect of asking a registry a question; the tab list is asked
+        # first, so it has to ask for itself.
+        try:
+            import plugins
+
+            plugins.load()
+        except Exception as e:  # noqa: BLE001 - a plugin never blocks the window
+            print(f"[gui] plugins: {e}", flush=True)
+
         nb = ttk.Notebook(self.root)
         nb.pack(fill="both", expand=True, padx=14, pady=(6, 0))
         self.tab_record = ttk.Frame(nb, padding=18)
@@ -305,6 +345,17 @@ class App:
         self.tab_set = ttk.Frame(nb)
         nb.add(self.tab_record, text="Record")
         nb.add(self.tab_conn, text="Connections")
+        # Anything an installed package registered. A core-only build has an
+        # empty registry and shows the three tabs it always had.
+        self.extra_tabs = {}
+        for title, build in extra_tabs():
+            frame = ttk.Frame(nb, padding=18)
+            nb.add(frame, text=title)
+            self.extra_tabs[title] = frame
+            try:
+                build(self, frame)
+            except Exception as e:  # noqa: BLE001 - a bad tab is not a dead window
+                print(f"[gui] tab {title!r} failed: {e}", flush=True)
         nb.add(self.tab_set, text="Settings")
         self._build_record(self.tab_record)
         self._build_connections(self.tab_conn)
@@ -370,8 +421,14 @@ class App:
         self.check_btn.config(state="disabled", text="Checking…")
 
         def worker():
+            import network
+
             try:
                 result = updates.check_now()
+            except network.Sealed:
+                # Reported separately from offline on purpose. The user chose
+                # this; saying "offline" would send them to check their wifi.
+                self.root.after(0, self._update_done, _SEALED)
             except updates.CheckFailed:
                 self.root.after(0, self._update_done, None)
             except Exception:  # noqa: BLE001
@@ -383,6 +440,9 @@ class App:
 
     def _update_done(self, result):
         self.check_btn.config(state="normal", text="Check for updates")
+        if result is _SEALED:
+            self.ver_line.config(text=f"v{updates.current()} · sealed", fg=MUTED)
+            return
         if result is None:
             # Offline is not an error. Same rule as the calendar integration.
             self.ver_line.config(text=f"v{updates.current()} · offline", fg=MUTED)
@@ -517,7 +577,7 @@ class App:
             self._tick_saving()
             threading.Thread(target=self._stop_worker, daemon=True).start()
         else:
-            self._set_state("Starting…", "Loading the speech model.")
+            self._set_state("Starting…", "Opening the microphone.")
             threading.Thread(target=self._start_worker, daemon=True).start()
 
     def _start_worker(self):
@@ -537,7 +597,11 @@ class App:
         self.transcript.configure(state="normal")
         self.transcript.delete("1.0", "end")
         self.transcript.configure(state="disabled")
-        self._say(f"Recording “{title}”." if title else "Recording.", "hint")
+        # The model may still be building on a background thread. Say so, rather
+        # than let an empty transcript for the first second read as a failure.
+        warming = "" if getattr(self.engine, "model_ready", lambda: True)()             else " Transcribing shortly — the speech model is still loading."
+        self._say((f"Recording “{title}”." if title else "Recording.") + warming,
+                  "hint")
         self.record_btn.configure(text="■ Stop & save", style="Stop.TButton",
                                   state="normal")
         self._set_state("● Recording", title or "Manual session — no calendar event.")
@@ -1534,14 +1598,11 @@ class App:
         launcher — the MCP server would come up without the providers the rest
         of the app has.
         """
-        launcher = os.path.abspath(sys.argv[0]) if sys.argv and sys.argv[0] else ""
-        if launcher.endswith(".py") and os.path.isfile(launcher):
-            args = [launcher, "--mcp"]
-        else:
-            args = [os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                 "mcp_server.py")]
-        blob = json.dumps({"mcpServers": {"vlocalhost": {
-            "command": sys.executable, "args": args}}}, indent=2)
+        import mcp_hosts
+
+        # One source of truth: the Assistants screen an extension may add shows
+        # the same block, so the two can never disagree about how to launch us.
+        blob = mcp_hosts.standard_block()
         self.root.clipboard_clear()
         self.root.clipboard_append(blob)
         messagebox.showinfo(

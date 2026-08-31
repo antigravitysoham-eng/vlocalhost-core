@@ -11,6 +11,10 @@ touching the window code.
 
 Rules this follows, because a donation prompt that ignores them is spam:
 
+* It never appears to anyone who has already paid. A paid package declares
+  itself through Core's ``entitlement`` registry and this returns before it
+  has even counted the close. Core still learns nothing about who that
+  package is or what it sells.
 * It never appears before the notes are saved. The hook runs after shutdown.
 * It appears on every close, including the first. This is a deliberate product
   decision, taken for launch and easily reversed: raise
@@ -30,6 +34,7 @@ import platform
 import tkinter as tk
 from tkinter import ttk
 
+import entitlement
 from integrations import store
 
 _FILE = "support_prompt.json"
@@ -92,6 +97,12 @@ def _asset(name: str):
 def maybe_show(root) -> None:
     """Exit hook. Decides whether to ask, then asks. Never raises."""
     try:
+        # Somebody who bought the paid build has already answered this ask, and
+        # asking them anyway is the one version of it that is genuinely rude.
+        # Checked before the close is counted, so that uninstalling the paid
+        # package doesn't leave a free install owing a backlog of asks.
+        if entitlement.is_paid():
+            return
         state = _state()
         # Nothing sets this any more — the "Don't ask again" tickbox is gone.
         # It is still honoured for anyone who ticked it while it existed;

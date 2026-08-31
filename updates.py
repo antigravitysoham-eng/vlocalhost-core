@@ -35,6 +35,7 @@ import re
 import urllib.request
 
 import config
+import network
 import version
 from integrations import store
 
@@ -172,7 +173,15 @@ def check_now(timeout: float = 6.0) -> dict:
     Raises :class:`CheckFailed` when offline or unreachable. Being offline is not
     an error condition for this product -- callers show the message and carry on,
     the same rule the calendar integration follows.
+
+    On a sealed install it raises :class:`network.Sealed` before any socket is
+    opened. That is a different exception on purpose: offline means *could not*,
+    sealed means *would not*, and a user who set the switch deserves to be told
+    which one they are looking at.
     """
+    if not network.allowed("update_check"):
+        raise network.refuse("update_check")
+
     req = urllib.request.Request(
         config.UPDATE_API_URL,
         headers={
@@ -194,6 +203,7 @@ def check_now(timeout: float = 6.0) -> dict:
         raise CheckFailed(f"unrecognised release tag: {latest!r}")
 
     now = current()
+    network.record("update_check")
     _write_state(**{
         LAST_CHECK_KEY: _today().isoformat(),
         LAST_SEEN_KEY: latest,

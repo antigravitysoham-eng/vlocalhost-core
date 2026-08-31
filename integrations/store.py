@@ -99,11 +99,31 @@ def notes_dir() -> str:
 
 
 def models_dir() -> str:
-    """Return (creating if needed) the folder downloaded models are cached in.
+    """The folder downloaded speech models are actually cached in.
 
-    Survives reinstalls, so nobody re-downloads a multi-gigabyte model because
-    they updated the app.
+    Reported by ``--paths`` and nothing else, which is the only reason it can
+    be corrected without touching a single byte on anyone's disk.
+
+    It used to return ``<data>/models`` and create it. Nothing ever wrote
+    there. faster-whisper hands the download to ``huggingface_hub``, which uses
+    its own cache, so ``--paths`` named an empty folder while the real models
+    sat somewhere else entirely -- roughly a gigabyte of them. In a support
+    conversation that is worse than saying nothing: it sends somebody to look
+    in a place that is guaranteed to be empty, and it makes a wrong answer to
+    "why is my disk full".
+
+    The promise the old docstring made is still kept, just not by us. The
+    Hugging Face cache lives in the user's profile, not the program folder, so
+    it already survives reinstalls and updates. Resolution order below is
+    huggingface_hub's own, read without importing it -- this is called from
+    ``--paths``, which must stay fast and must not drag in the ML stack.
     """
-    path = os.path.join(data_dir(), "models")
-    os.makedirs(path, exist_ok=True)
-    return path
+    explicit = os.environ.get("HF_HUB_CACHE")
+    if explicit:
+        return explicit
+    home = os.environ.get("HF_HOME")
+    if home:
+        return os.path.join(home, "hub")
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    base = xdg if xdg else os.path.join(os.path.expanduser("~"), ".cache")
+    return os.path.join(base, "huggingface", "hub")

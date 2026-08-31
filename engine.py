@@ -294,6 +294,17 @@ class AppEngine:
         transcriber = self._notetaker.transcriber
         return bool(getattr(transcriber, "unload", lambda: False)())
 
+    def model_ready(self) -> bool:
+        """True if the speech model is already resident.
+
+        The window asks so it can say "transcribing shortly" instead of showing
+        an empty transcript that looks like a failure. False is not an error --
+        it just means the model is still building while audio is recorded.
+        """
+        if self._notetaker is None:
+            return False
+        return getattr(self._notetaker.transcriber, "_model", True) is not None
+
     @property
     def is_listening(self) -> bool:
         return self._notetaker is not None and self._notetaker.listening
