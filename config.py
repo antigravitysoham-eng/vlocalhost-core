@@ -175,7 +175,33 @@ NOTES_LANGUAGE = "en"
 # Leave as None to use faster-whisper with the settings above.
 CUSTOM_TRANSCRIBER = None
 
-# --- Summarization (Ollama, runs locally) --------------------------------
+# --- Summarization -------------------------------------------------------
+# Which engine writes the notes. "ollama" is the default and, for now, the only
+# built-in: it runs a model on this machine and is a model manager as well as a
+# runtime, which is most of why it is worth keeping even once others exist.
+#
+# The setting exists ahead of a second engine on purpose. "Bring your own model"
+# is a claim the product makes, and a claim that rests on one particular process
+# being installed is one process away from being untrue. Everything above the
+# engine -- the prompts, the language rule, the timestamp handling -- lives in
+# summarizer.py and every backend inherits it.
+SUMMARY_ENGINE = "ollama"
+
+# "module.path:ClassName" of a notes engine to use instead of the built-in --
+# an embedded llama.cpp, an LM Studio or llama-server endpoint, a model you
+# converted yourself. It needs two methods, summarize(transcript) and
+# title(transcript); see summarizer.py.
+#
+# This imports and runs code you name. That is no more privileged than editing
+# this file was -- same user, same machine -- but it is worth saying plainly,
+# and it is the one setting that can send a transcript somewhere we do not
+# control, because a custom engine can point anywhere you point it.
+CUSTOM_SUMMARIZER = None
+
+# Where Ollama listens, and which model it should use. Only read by the
+# "ollama" engine. The URL is a setting rather than a constant because some
+# people run Ollama on another machine -- which does mean transcripts leave
+# this one, so `--network` names it explicitly rather than assuming loopback.
 OLLAMA_URL = "http://localhost:11434"
 OLLAMA_MODEL = "llama3.2"    # pull first:  ollama pull llama3.2
 

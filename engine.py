@@ -101,24 +101,22 @@ def _release_lock():
             pass
 
 
-def check_ollama():
-    """(ok, detail) for the local summarization model — never raises."""
-    import requests
+def check_notes_engine():
+    """(ok, detail) for whatever writes the notes — never raises.
 
-    try:
-        resp = requests.get(f"{config.OLLAMA_URL}/api/tags", timeout=4)
-        resp.raise_for_status()
-        names = [m.get("name", "") for m in resp.json().get("models", [])]
-    except Exception as e:  # noqa: BLE001 - a status check must not throw
-        return False, f"not reachable at {config.OLLAMA_URL} ({e.__class__.__name__})"
+    The probe belongs to the engine, not here. "Is a model present" is a
+    question only the engine can answer: Ollama answers it with /api/tags, an
+    embedded model would answer it by looking at a file on disk. This used to
+    hold one of two near-identical copies of the Ollama-shaped version.
+    """
+    import summarizer
 
-    want = config.OLLAMA_MODEL
-    # Ollama reports "llama3.2:latest" for a model pulled as "llama3.2".
-    if any(n == want or n.split(":")[0] == want.split(":")[0] for n in names):
-        return True, f"{want} ready"
-    if names:
-        return False, f"running, but {want} isn't pulled (ollama pull {want})"
-    return False, f"running, but no models pulled (ollama pull {want})"
+    return summarizer.status()
+
+
+# The old name, kept because the GUI and the MCP server both call it. It was
+# only ever accurate while Ollama was the only engine there could be.
+check_ollama = check_notes_engine
 
 
 def _named(title):

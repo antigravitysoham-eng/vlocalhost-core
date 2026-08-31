@@ -56,6 +56,12 @@ EDITABLE = (
     # privileged than config.py was — same user, same machine — but it is
     # worth being explicit about.
     "CUSTOM_TRANSCRIBER",
+    # Which engine writes the notes, and the escape hatch to any other one.
+    # Editable for the same reason CUSTOM_TRANSCRIBER is: model freedom is a
+    # promise the product makes, and a promise that can only be exercised by
+    # editing config.py is reverted by the next update.
+    "SUMMARY_ENGINE",
+    "CUSTOM_SUMMARIZER",
     # How often the local, network-free update reminder fires. 0 turns it off.
     "UPDATE_REMINDER_DAYS",
     # The system-wide key that starts and stops a recording, and its off

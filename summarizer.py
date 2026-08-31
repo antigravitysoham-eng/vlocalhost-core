@@ -1,10 +1,31 @@
-"""Turn a raw transcript into structured meeting notes using a local Ollama model.
+"""Turn a raw transcript into structured meeting notes — bring your own model.
 
 The transcript may be in any language, or several — lines are tagged with the
 speaker and the detected language code. ``config.NOTES_LANGUAGE`` decides
 whether the notes come back in English or in whatever was spoken.
+
+Like :mod:`transcriber`, the engine is pluggable and the rest of the app never
+hardcodes one. ``config.SUMMARY_ENGINE`` picks a built-in; ``CUSTOM_SUMMARIZER``
+attaches anything else. Use :func:`build_summarizer` to get the configured
+engine.
+
+Any engine needs two methods, and may add a third:
+    summarize(self, transcript)  -> Markdown notes
+    title(self, transcript)      -> a short title, or "" if unavailable
+    load(self)                   -> warm up (optional)
+
+Everything above that line -- the prompts, the language rule, the timestamp
+handling, the plain-text rendering -- belongs to the *product*, not to any one
+engine, so it stays here and every backend gets it for free. A backend's whole
+job is to turn a prompt into text.
+
+Why this shape, when Ollama was the only engine for a year: because "bring your
+own model" is the claim on the website, and a claim that rests on one process
+being installed is one process away from being untrue. Ollama stays a
+first-class backend and the default; it is simply no longer the only door.
 """
 
+import importlib
 import re
 
 import requests
@@ -104,12 +125,14 @@ def _language_rule() -> str:
     return _LANGUAGE_RULE.format(directive=directive)
 
 
-def generate_title(transcript: str) -> str:
-    """Return a short human title for the meeting, or '' if Ollama is unreachable.
+def _notes_prompt(transcript: str) -> str:
+    """The notes prompt, timestamps stripped on the way in."""
+    return _PROMPT.format(transcript=strip_timestamps(transcript),
+                          language_rule=_language_rule())
 
-    Used to name the saved files. Never raises — naming falls back to a
-    timestamp when the model can't be reached.
-    """
+
+def _title_prompt(transcript: str) -> str:
+    """The title prompt, from the opening of the meeting only."""
     # 1200 characters, not 4000. Naming a meeting needs the opening minutes,
     # not the whole thing, and the cost of this call scales with what it is
     # given: measured on llama3.2 over a 7k-character transcript, the title
@@ -117,17 +140,176 @@ def generate_title(transcript: str) -> str:
     # for a *better* title, because a short excerpt gives the model less to
     # ramble about. This call sits directly between a user pressing Stop and
     # their notes appearing, so it is worth being cheap.
-    prompt = _TITLE_PROMPT.format(transcript=transcript[:1200])
-    try:
+    return _TITLE_PROMPT.format(transcript=transcript[:1200])
+
+
+# --- the engines ----------------------------------------------------------
+
+class OllamaSummarizer:
+    """Notes from a model served by Ollama on ``config.OLLAMA_URL``.
+
+    The default, and the only engine until now. It is kept first-class rather
+    than deprecated: Ollama is a model *manager* as well as a runtime, and
+    ``ollama pull mistral`` is a better experience than "find a GGUF" for
+    anyone who already has it installed.
+    """
+
+    name = "ollama"
+
+    def model_label(self) -> str:
+        return config.OLLAMA_MODEL
+
+    def status(self):
+        """(ok, detail) — never raises, because a health check that throws is
+        worse than one that says it does not know."""
+        try:
+            resp = requests.get(f"{config.OLLAMA_URL}/api/tags", timeout=4)
+            resp.raise_for_status()
+            names = [m.get("name", "") for m in resp.json().get("models", [])]
+        except Exception as e:                    # noqa: BLE001
+            return False, (f"not reachable at {config.OLLAMA_URL} "
+                           f"({e.__class__.__name__})")
+
+        want = config.OLLAMA_MODEL
+        # Ollama reports "llama3.2:latest" for a model pulled as "llama3.2".
+        if any(n == want or n.split(":")[0] == want.split(":")[0] for n in names):
+            return True, f"{want} ready"
+        if names:
+            return False, f"running, but {want} isn't pulled (ollama pull {want})"
+        return False, f"running, but no models pulled (ollama pull {want})"
+
+    def _generate(self, prompt: str, timeout: int) -> str:
         resp = requests.post(
             f"{config.OLLAMA_URL}/api/generate",
             json={"model": config.OLLAMA_MODEL, "prompt": prompt, "stream": False},
-            timeout=120,
+            timeout=timeout,
         )
         resp.raise_for_status()
-    except requests.exceptions.RequestException:
+        return resp.json().get("response", "").strip()
+
+    def title(self, transcript: str) -> str:
+        try:
+            return self._generate(_title_prompt(transcript), 120)
+        except requests.exceptions.RequestException:
+            return ""
+
+    def summarize(self, transcript: str) -> str:
+        try:
+            return self._generate(_notes_prompt(transcript), 600)
+        except requests.exceptions.ConnectionError as e:
+            raise RuntimeError(
+                "Could not reach Ollama. Is it running? Start it with "
+                f"`ollama serve` and pull the model with `ollama pull "
+                f"{config.OLLAMA_MODEL}`."
+            ) from e
+        except requests.exceptions.HTTPError as e:
+            raise RuntimeError(f"Ollama returned an error: {e}") from e
+
+
+_ENGINES = {"ollama": OllamaSummarizer}
+
+
+def _load_custom(spec):
+    """Resolve "module.path:attr" to an instance (calls the attr if callable)."""
+    if ":" not in spec:
+        raise ValueError(
+            f'CUSTOM_SUMMARIZER must look like "module.path:ClassName", got {spec!r}.'
+        )
+    module_name, attr = spec.split(":", 1)
+    obj = getattr(importlib.import_module(module_name), attr)
+    return obj() if callable(obj) else obj
+
+
+def build_summarizer():
+    """Return the configured notes engine.
+
+    ``CUSTOM_SUMMARIZER`` wins when set — it imports and runs code the user
+    named, which is no more privileged than editing config.py was, but is worth
+    being explicit about. Otherwise ``SUMMARY_ENGINE`` selects a built-in.
+    """
+    spec = getattr(config, "CUSTOM_SUMMARIZER", None)
+    if spec:
+        engine = _load_custom(spec)
+        for method in ("summarize", "title"):
+            if not hasattr(engine, method):
+                raise TypeError(
+                    f"CUSTOM_SUMMARIZER {spec!r} must provide a "
+                    f".{method}(transcript) method returning text."
+                )
+        return engine
+
+    name = (getattr(config, "SUMMARY_ENGINE", "ollama") or "ollama").lower()
+    engine_cls = _ENGINES.get(name)
+    if engine_cls is None:
+        raise ValueError(
+            f"Unknown SUMMARY_ENGINE {name!r}. Installed: "
+            f"{', '.join(sorted(_ENGINES))} - or set CUSTOM_SUMMARIZER."
+        )
+    return engine_cls()
+
+
+# One engine, reused. Rebuilt when the settings that choose it change, so a
+# switch in the UI takes effect without a restart -- and so an engine that has
+# to load a model from disk pays that cost once rather than per meeting.
+_engine = None
+_engine_key = None
+
+
+def engine():
+    """The live engine, built on first use and cached until the config moves."""
+    global _engine, _engine_key
+    key = (getattr(config, "CUSTOM_SUMMARIZER", None),
+           getattr(config, "SUMMARY_ENGINE", "ollama"))
+    if _engine is None or key != _engine_key:
+        _engine = build_summarizer()
+        _engine_key = key
+    return _engine
+
+
+# --- what the rest of the app calls ----------------------------------------
+
+# ``status`` and ``model_label`` are optional on an engine: the required
+# contract stays the two methods that make notes, so somebody can write a
+# working backend in ten lines. These fall back to something honest when a
+# minimal engine does not implement them, rather than refusing to run it.
+
+def status():
+    """(ok, detail) for whatever engine is configured. Never raises."""
+    try:
+        eng = engine()
+    except Exception as e:                        # noqa: BLE001
+        return False, f"notes engine unavailable ({e.__class__.__name__})"
+    probe = getattr(eng, "status", None)
+    if probe is None:
+        return True, f"{model_label()} (this engine reports no status)"
+    try:
+        return probe()
+    except Exception as e:                        # noqa: BLE001
+        return False, f"status check failed ({e.__class__.__name__})"
+
+
+def model_label() -> str:
+    """What to show a user when naming the notes model. Never raises."""
+    try:
+        eng = engine()
+    except Exception:                             # noqa: BLE001
+        return "unavailable"
+    label = getattr(eng, "model_label", None)
+    try:
+        return label() if label else getattr(eng, "name", "custom")
+    except Exception:                             # noqa: BLE001
+        return getattr(eng, "name", "custom")
+
+def generate_title(transcript: str) -> str:
+    """Return a short human title for the meeting, or '' if unavailable.
+
+    Used to name the saved files. Never raises — naming falls back to a
+    timestamp when the model can't be reached.
+    """
+    try:
+        return engine().title(transcript)
+    except Exception:  # noqa: BLE001 - a title is never worth failing a meeting
         return ""
-    return resp.json().get("response", "").strip()
 
 
 def to_plain_text(md: str) -> str:
@@ -196,26 +378,12 @@ def to_plain_text(md: str) -> str:
 
 
 def summarize(transcript: str) -> str:
-    """Return Markdown notes, or raise RuntimeError if Ollama is unreachable.
+    """Return Markdown notes, or raise RuntimeError if the engine is unreachable.
 
     Timestamps are stripped on the way in and scrubbed on the way out, so the
-    notes stay a summary rather than becoming a second transcript.
+    notes stay a summary rather than becoming a second transcript. The scrub
+    happens here rather than in each engine: it is a property of the notes we
+    want, not of the model that wrote them, and a backend author should not
+    have to know about it to be correct.
     """
-    prompt = _PROMPT.format(transcript=strip_timestamps(transcript),
-                            language_rule=_language_rule())
-    try:
-        resp = requests.post(
-            f"{config.OLLAMA_URL}/api/generate",
-            json={"model": config.OLLAMA_MODEL, "prompt": prompt, "stream": False},
-            timeout=600,
-        )
-        resp.raise_for_status()
-    except requests.exceptions.ConnectionError as e:
-        raise RuntimeError(
-            "Could not reach Ollama. Is it running? Start it with `ollama serve` "
-            f"and pull the model with `ollama pull {config.OLLAMA_MODEL}`."
-        ) from e
-    except requests.exceptions.HTTPError as e:
-        raise RuntimeError(f"Ollama returned an error: {e} — {resp.text}") from e
-
-    return scrub_timestamps(resp.json().get("response", "").strip())
+    return scrub_timestamps(engine().summarize(transcript))

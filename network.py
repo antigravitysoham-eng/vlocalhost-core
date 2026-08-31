@@ -106,15 +106,17 @@ CONNECTIONS: tuple[Connection, ...] = (
     ),
     Connection(
         key="local_model",
-        label="Note writing (Ollama)",
-        host="Wherever OLLAMA_URL points. Ships as 127.0.0.1 - this machine.",
+        label="Note writing (the configured engine)",
+        host="Wherever the notes engine points. Ships as Ollama on 127.0.0.1 "
+             "- this machine.",
         when="Every time a recording is stopped and notes are written, and "
              "when the app checks which models you have.",
         carries="The transcript, to a model running on this computer.",
         learns="Nothing, at the shipped setting: loopback traffic never "
-               "reaches a network. OLLAMA_URL is yours to change, and pointing "
-               "it at another machine sends transcripts there. Nothing else in "
-               "this app can be redirected that way.",
+               "reaches a network. Two settings can change that, and they are "
+               "the only two in the app that can: OLLAMA_URL, if you point it "
+               "at another machine, and CUSTOM_SUMMARIZER, which runs an "
+               "engine you choose and can reach wherever you send it.",
         content=True,
         sealable=False,
     ),
@@ -361,6 +363,12 @@ def audit(root: str = "") -> list[str]:
                                 "tools"}]
         for name in sorted(files):
             if not name.endswith(".py") or name == "network.py":
+                continue
+            # Tests are not shipped surface. test_smoke.py deliberately calls
+            # Ollama to prove a real meeting still becomes real notes, and
+            # flagging that would train people to ignore this check -- which is
+            # the only failure mode that matters for a drift detector.
+            if name.startswith("test_"):
                 continue
             path = os.path.join(folder, name)
             try:

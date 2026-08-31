@@ -1634,10 +1634,14 @@ class App:
         self.root.after(1000, self._tick)
 
     def _refresh_status_right(self):
+        import summarizer
+
         provider = config.CALENDAR_PROVIDER or "local only"
         lang = config.WHISPER_LANGUAGE or "auto"
+        # The notes model comes from the engine, not from OLLAMA_MODEL, so this
+        # line stays true for whoever is actually writing the notes.
         self.status_right.configure(
-            text=f"{config.WHISPER_MODEL} · {lang} · {config.OLLAMA_MODEL} "
+            text=f"{config.WHISPER_MODEL} · {lang} · {summarizer.model_label()} "
                  f"· {provider}")
 
     def _report_problem(self):

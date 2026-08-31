@@ -119,20 +119,22 @@ def _tail(lines: int = REPORT_LOG_LINES) -> str:
 # ---------------------------------------------------------------------------
 # the report
 # ---------------------------------------------------------------------------
-def _ollama_state() -> str:
-    try:
-        import config
-        import requests
+def _notes_engine_state() -> str:
+    """Which engine writes the notes, and whether it is ready.
 
-        r = requests.get(f"{config.OLLAMA_URL}/api/tags", timeout=2)
-        if not r.ok:
-            return f"HTTP {r.status_code}"
-        names = [m.get("name", "") for m in r.json().get("models", [])]
-        want = getattr(config, "OLLAMA_MODEL", "")
-        has = any(n.split(":")[0] == want.split(":")[0] for n in names if n)
-        return f"reachable, {want} {'present' if has else 'NOT PULLED'}"
+    Asks the engine rather than probing Ollama, so a report from a machine
+    running something else describes what is actually installed there.
+    """
+    try:
+        import summarizer
+
+        ok, detail = summarizer.status()
+        # The engine's name, not the model's: every engine's detail already
+        # names its own model, and prefixing the label printed it twice.
+        name = getattr(summarizer.engine(), "name", "custom")
+        return f"{name}: {detail}"
     except Exception as e:  # noqa: BLE001
-        return f"not reachable ({type(e).__name__})"
+        return f"unknown ({type(e).__name__})"
 
 
 def _network_state() -> str:
@@ -197,7 +199,7 @@ def build_report(error: str = "") -> str:
         f"app           {APP_VERSION} ({edition})",
         f"python        {platform.python_version()} ({platform.architecture()[0]})",
         f"os            {platform.system()} {platform.release()} ({platform.machine()})",
-        f"ollama        {_ollama_state()}",
+        f"notes engine  {_notes_engine_state()}",
         f"network       {_network_state()}",
         "",
         "Settings",
