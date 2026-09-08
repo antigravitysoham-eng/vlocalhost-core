@@ -27,6 +27,19 @@ import performance
 import settings
 from integrations import UPGRADE_URL, available_providers, provider_label, store
 
+#: Whether Settings offers the built-in note writer.
+#:
+#: False until chunked summaries are good enough to stand behind. The engine
+#: itself is complete and tested -- see ``summarizer.py`` and ``rolling.py`` --
+#: and it is reachable through ``--set SUMMARY_ENGINE=llamacpp`` for anyone
+#: developing against it. What is not ready is the answer it gives on a long
+#: meeting: below about 4 500 words it is fine, and above that the notes are
+#: assembled from parts that measurably lose detail against a single call.
+#:
+#: One flag rather than deleting the rows, so turning the feature on is a
+#: one-line change and a rebuild rather than an archaeology exercise.
+SHOW_BUILTIN_NOTES_ENGINE = False
+
 # --- Brand tokens ---------------------------------------------------------
 INK = "#090C12"       # window ground
 PANEL = "#0E1220"     # cards / surfaces
@@ -147,7 +160,10 @@ class App:
         self._check_loopback()
         self._show_language_warning()
         self._refresh_profile()
-        threading.Thread(target=self._check_ollama, daemon=True).start()
+        # Before the first probe returns, so the screen never opens showing rows
+        # that belong to an engine this install is not running.
+        self._show_notes_engine_rows()
+        self._start_engine_check()
         self._start_remote_control()
 
     # -- the hotkey and the second launch ------------------------------------
@@ -275,8 +291,50 @@ class App:
                     font=(BODY[0], 10, "bold"))
         s.configure("TEntry", fieldbackground=INK, foreground=PAPER,
                     insertcolor=AMBER, bordercolor=EDGE)
+        # A dropdown has more states than `configure` reaches, and the one the
+        # app uses most -- state="readonly", for a list you pick from rather
+        # than type into -- is not among them. Left alone, clam paints those in
+        # its own pale palette: the language, the notes engine and the model
+        # picker all rendered as near-white text on near-white ground, so the
+        # current selection could not be read at all. The `map` below is what
+        # actually fixes it; `configure` only covers the editable case.
         s.configure("TCombobox", fieldbackground=INK, background=EDGE,
-                    foreground=PAPER, arrowcolor=AMBER)
+                    foreground=PAPER, arrowcolor=AMBER,
+                    selectbackground=INK, selectforeground=PAPER)
+        s.map("TCombobox",
+              fieldbackground=[("readonly", INK), ("disabled", PANEL)],
+              foreground=[("readonly", PAPER), ("disabled", MUTED)],
+              # A readonly combobox draws its value as *selected* text, so
+              # without these two the highlight repaints it in system colours
+              # the moment it takes focus and it disappears again.
+              selectbackground=[("readonly", INK), ("focus", INK)],
+              selectforeground=[("readonly", PAPER), ("focus", PAPER)],
+              background=[("active", EDGE), ("readonly", EDGE)],
+              arrowcolor=[("disabled", MUTED)])
+
+        # The open list is a plain Tk listbox owned by Tk, not a ttk widget, so
+        # no style reaches it -- it has to be set through the option database
+        # before the first one is created.
+        for option, value in (
+                ("*TCombobox*Listbox.background", PANEL),
+                ("*TCombobox*Listbox.foreground", PAPER),
+                ("*TCombobox*Listbox.selectBackground", AMBER),
+                ("*TCombobox*Listbox.selectForeground", INK),
+                ("*TCombobox*Listbox.font", BODY)):
+            self.root.option_add(option, value)
+
+        # Tk binds the mouse wheel on a combobox to *change its value*. On a
+        # settings page that also scrolls, both happen at once: the page moves
+        # and whichever dropdown passed under the pointer silently takes a new
+        # value -- and these save on change, so scrolling past the speech model
+        # rewrites it to something the user never chose. Found by doing exactly
+        # that: a scroll turned "base" into "small" and wrote it to disk.
+        #
+        # Replace the class binding with a no-op rather than returning "break".
+        # The page scroll is a bind_all handler, which runs after the class
+        # binding, so swallowing the event would fix the value and break the
+        # scrolling instead.
+        self.root.bind_class("TCombobox", "<MouseWheel>", lambda _e: None)
 
     def _header(self):
         bar = ttk.Frame(self.root, style="Ink.TFrame", padding=(20, 14, 20, 6))
@@ -611,6 +669,27 @@ class App:
         self._busy = False
         self.record_btn.configure(state="normal")
         self._set_state("Ready to record", "Could not start.")
+        # A failed Start used to leave nothing behind but a dialog the user
+        # closed. The log recorded that the app launched and which settings
+        # moved, and nothing at all about a recording that never began -- so a
+        # report of "no playback device" could not be tied to a capture mode,
+        # a device, or an exception type afterwards. That happened, and the
+        # only way to investigate was to try to provoke it again live.
+        #
+        # The device state this depends on is exactly the kind that changes
+        # while nobody is looking: headsets connect, a call takes the default
+        # endpoint, Windows switches the communications device. Which is why
+        # the moment matters and reconstructing it later does not work.
+        try:
+            import diagnostics
+
+            diagnostics.write(
+                "start failed: mode=%s device=%r -- %s: %s"
+                % (getattr(config, "CAPTURE_MODE", "?"),
+                   getattr(config, "INPUT_DEVICE", None),
+                   type(err).__name__, err))
+        except Exception:                          # noqa: BLE001 - logging a
+            pass                                   # failure must not add one
         messagebox.showerror("Could not start recording", str(err))
 
     def _tick_saving(self):
@@ -1186,50 +1265,180 @@ class App:
                         command=self._language_changed).grid(
             row=4, column=0, columnspan=3, sticky="w", pady=(0, 6))
 
-        ttk.Label(models, text="Ollama server").grid(row=5, column=0, sticky="w")
-        self.ollama_url_var = tk.StringVar(value=current.get("OLLAMA_URL"))
-        ttk.Entry(models, textvariable=self.ollama_url_var, width=36).grid(
-            row=5, column=1, sticky="w", padx=10, pady=4)
-        ttk.Label(models, text="another machine on your LAN works too",
-                  style="Muted.TLabel").grid(row=5, column=2, sticky="w")
+        # Who writes the summaries. Two plain choices, because that is the whole
+        # decision for almost everybody: use what the app can install itself, or
+        # use the Ollama you already have. The engine names -- llamacpp,
+        # ctranslate2 -- are a fact about the runtime, not a question a person
+        # should have to answer, so they live under Advanced.
+        import notes_model as _notes_model
+        import summarizer as _summarizer
 
-        ttk.Label(models, text="Summarization").grid(row=6, column=0, sticky="w")
+        ttk.Label(models, text="Summaries by").grid(row=5, column=0, sticky="w")
+        choice = ttk.Frame(models)
+        choice.grid(row=5, column=1, sticky="w", padx=10, pady=4)
+        self.notes_choice_var = tk.StringVar(
+            value=("ollama" if (current.get("SUMMARY_ENGINE") or "ollama")
+                   == "ollama" else "builtin"))
+        # "Built in" is written, tested and not offered. It works, and only up
+        # to about half an hour of speech: past roughly 4 500 words the prompt
+        # exceeds the model's context window and the meeting comes back with a
+        # transcript and no notes at all. `rolling.py` removes that ceiling by
+        # summarising in parts, and the parts are measurably worse than one call
+        # -- on the same meeting run both ways, 2 of 17 known facts recovered
+        # against 5, with "we are about halfway through the agenda" filed as a
+        # discussion point.
+        #
+        # A headline feature that quietly produces nothing after thirty minutes
+        # is worse than one that is not there yet, so the row stays hidden until
+        # the chunked path is good enough to stand behind. Everything below it
+        # still works: SUMMARY_ENGINE and NOTES_MODEL remain editable through
+        # --set, so this is hidden from the screen, not removed from the build.
+        if SHOW_BUILTIN_NOTES_ENGINE:
+            ttk.Radiobutton(choice, text="Built in", value="builtin",
+                            variable=self.notes_choice_var,
+                            command=self._notes_choice_changed).pack(side="left")
+        ttk.Radiobutton(choice, text="Ollama", value="ollama",
+                        variable=self.notes_choice_var,
+                        command=self._notes_choice_changed).pack(
+            side="left", padx=(14, 0) if SHOW_BUILTIN_NOTES_ENGINE else (0, 0))
+        self.notes_status = ttk.Label(models, text="checking the notes engine...",
+                                      style="Muted.TLabel", wraplength=300,
+                                      justify="left")
+        self.notes_status.grid(row=5, column=2, sticky="w")
+
+        # The download, offered only when it is the piece that is missing.
+        get_label = ttk.Label(models, text="Notes model")
+        get_label.grid(row=6, column=0, sticky="w")
+        get = ttk.Frame(models)
+        get.grid(row=6, column=1, sticky="w", padx=10, pady=4)
+        self.get_model_btn = ttk.Button(
+            get, text="Download (%d MB)" % _notes_model.DEFAULT.size_mb,
+            command=self._download_notes_model)
+        self.get_model_btn.pack(side="left")
+        self.get_model_bar = ttk.Progressbar(get, mode="determinate",
+                                             maximum=1000, length=140)
+        # The terms, before the download rather than after it. One line, and a
+        # link, because "Apache-2.0" means nothing to most people and the point
+        # is that they can go and look.
+        self._licence_link(get, _notes_model.DEFAULT.licence,
+                           _notes_model.DEFAULT.licence_url).pack(side="left",
+                                                                  padx=(10, 0))
+        self.get_progress = tk.StringVar(
+            value="%s - one download, nothing else to install"
+                  % _notes_model.DEFAULT.label)
+        get_hint = ttk.Label(models, textvariable=self.get_progress,
+                             style="Muted.TLabel", wraplength=300,
+                             justify="left")
+        get_hint.grid(row=6, column=2, sticky="w")
+        self._download_rows = (get_label, get, get_hint)
+
+        # The same row, in its other state: the model is here and the only
+        # thing left to offer is getting rid of it. A download this size should
+        # be removable from the screen that put it there, not by hunting for a
+        # folder.
+        have_label = ttk.Label(models, text="Notes model")
+        have_label.grid(row=7, column=0, sticky="w")
+        have = ttk.Frame(models)
+        have.grid(row=7, column=1, sticky="w", padx=10, pady=4)
+        self.remove_model_btn = ttk.Button(have, text="Remove download",
+                                           command=self._remove_notes_model)
+        self.remove_model_btn.pack(side="left")
+        self.have_model_var = tk.StringVar(value="")
+        have_hint = ttk.Label(models, textvariable=self.have_model_var,
+                              style="Muted.TLabel", wraplength=300,
+                              justify="left")
+        have_hint.grid(row=7, column=2, sticky="w")
+        self._remove_rows = (have_label, have, have_hint)
+
+        ollama_url_label = ttk.Label(models, text="Ollama server")
+        ollama_url_label.grid(row=8, column=0, sticky="w")
+        self.ollama_url_var = tk.StringVar(value=current.get("OLLAMA_URL"))
+        ollama_url_entry = ttk.Entry(models, textvariable=self.ollama_url_var,
+                                     width=36)
+        ollama_url_entry.grid(row=8, column=1, sticky="w", padx=10, pady=4)
+        ollama_url_hint = ttk.Label(models,
+                                    text="another machine on your LAN works too",
+                                    style="Muted.TLabel")
+        ollama_url_hint.grid(row=8, column=2, sticky="w")
+
+        summ_label = ttk.Label(models, text="Summarization")
+        summ_label.grid(row=9, column=0, sticky="w")
         summ = ttk.Frame(models)
-        summ.grid(row=6, column=1, sticky="w", padx=10, pady=4)
+        summ.grid(row=9, column=1, sticky="w", padx=10, pady=4)
         self.ollama_var = tk.StringVar(value=current.get("OLLAMA_MODEL"))
         # A combobox, not an entry: typing a model name that isn't installed is
         # the single most common way to end up with no summaries and no clue why.
         self.ollama_box = ttk.Combobox(summ, textvariable=self.ollama_var,
                                        width=26)
         self.ollama_box.pack(side="left")
-        ttk.Button(summ, text="List…", width=8,
+        ttk.Button(summ, text="List...", width=8,
                    command=self._list_ollama_models).pack(side="left", padx=(6, 0))
-        self.ollama_label = ttk.Label(models, text="checking Ollama…",
-                                      style="Muted.TLabel")
-        self.ollama_label.grid(row=6, column=2, sticky="w")
+        self.ollama_label = ttk.Label(models, text="", style="Muted.TLabel")
+        self.ollama_label.grid(row=9, column=2, sticky="w")
 
-        ttk.Label(models, text="Custom engine").grid(row=7, column=0, sticky="w")
+        self.advanced_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(models, text="Advanced - pick the engine and the model "
+                                     "file yourself",
+                        variable=self.advanced_var,
+                        command=self._show_notes_engine_rows).grid(
+            row=10, column=0, columnspan=3, sticky="w", pady=(8, 2))
+
+        engine_label = ttk.Label(models, text="Engine")
+        engine_label.grid(row=11, column=0, sticky="w")
+        self.notes_engine_var = tk.StringVar(
+            value=(current.get("SUMMARY_ENGINE") or "ollama"))
+        engine_box = ttk.Combobox(models, textvariable=self.notes_engine_var,
+                                  width=34, state="readonly",
+                                  values=_summarizer.engine_names())
+        engine_box.grid(row=11, column=1, sticky="w", padx=10, pady=4)
+        engine_box.bind("<<ComboboxSelected>>",
+                        lambda _e: self._notes_engine_changed())
+        engine_hint = ttk.Label(models, text="which runtime writes the notes",
+                                style="Muted.TLabel")
+        engine_hint.grid(row=11, column=2, sticky="w")
+
+        notes_model_label = ttk.Label(models, text="Model file")
+        notes_model_label.grid(row=12, column=0, sticky="w")
+        notes_model_row = ttk.Frame(models)
+        notes_model_row.grid(row=12, column=1, sticky="w", padx=10, pady=4)
+        self.notes_model_var = tk.StringVar(value=current.get("NOTES_MODEL") or "")
+        ttk.Entry(notes_model_row, textvariable=self.notes_model_var,
+                  width=26).pack(side="left")
+        ttk.Button(notes_model_row, text="Browse...", width=8,
+                   command=self._browse_notes_model).pack(side="left", padx=(6, 0))
+        notes_model_hint = ttk.Label(
+            models, text="leave blank to use the downloaded or bundled copy",
+            style="Muted.TLabel", wraplength=300, justify="left")
+        notes_model_hint.grid(row=12, column=2, sticky="w")
+
+        # Rows that belong to one choice and mislead under the other.
+        self._ollama_rows = (ollama_url_label, ollama_url_entry, ollama_url_hint,
+                             summ_label, summ, self.ollama_label)
+        self._advanced_rows = (engine_label, engine_box, engine_hint,
+                               notes_model_label, notes_model_row,
+                               notes_model_hint)
+
+        ttk.Label(models, text="Custom engine").grid(row=13, column=0, sticky="w")
         self.custom_stt_var = tk.StringVar(
             value=current.get("CUSTOM_TRANSCRIBER") or "")
         ttk.Entry(models, textvariable=self.custom_stt_var, width=36).grid(
-            row=7, column=1, sticky="w", padx=10, pady=4)
+            row=13, column=1, sticky="w", padx=10, pady=4)
         ttk.Label(models, text="advanced — \"module:ClassName\"; runs code you "
                                "name. Blank = faster-whisper.",
-                  style="Muted.TLabel").grid(row=7, column=2, sticky="w")
+                  style="Muted.TLabel").grid(row=13, column=2, sticky="w")
 
         buttons = ttk.Frame(models)
-        buttons.grid(row=8, column=0, columnspan=3, sticky="w", pady=(10, 0))
+        buttons.grid(row=14, column=0, columnspan=3, sticky="w", pady=(10, 0))
         ttk.Button(buttons, text="Save models", command=self._save_models).pack(
             side="left")
-        ttk.Button(buttons, text="Re-check Ollama",
-                   command=lambda: threading.Thread(target=self._check_ollama,
-                                                    daemon=True).start()
+        ttk.Button(buttons, text="Re-check engine",
+                   command=self._start_engine_check
                    ).pack(side="left", padx=8)
         ttk.Button(buttons, text="Run setup again",
                    command=self._rerun_setup).pack(side="left")
         ttk.Label(models, text="A model or language change applies to the next "
                                "recording.", style="Muted.TLabel").grid(
-            row=9, column=0, columnspan=3, sticky="w", pady=(8, 0))
+            row=15, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
         mcp = ttk.LabelFrame(parent, text="Connect an AI assistant (MCP)",
                              style="Card.TLabelframe", padding=14)
@@ -1249,9 +1458,10 @@ class App:
                                 "with no internet. The installation guide "
                                 "covers each platform, first run and what "
                                 "every error message means. The summaries "
-                                "guide covers Ollama — installing it, "
-                                "choosing a model, and why a meeting can save "
-                                "a transcript and no notes.",
+                                "guide covers both ways to get a notes model "
+                                "— the one-button download and Ollama — and "
+                                "why a meeting can save a transcript and no "
+                                "notes.",
                   style="Muted.TLabel", wraplength=820, justify="left").pack(
             anchor="w")
         help_buttons = ttk.Frame(helpbox)
@@ -1519,6 +1729,194 @@ class App:
             style="Bad.TLabel" if warning else "Good.TLabel")
         self._refresh_status_right()
 
+    def _licence_link(self, parent, label, url):
+        """A small underlined licence name that opens the terms in a browser.
+
+        Matches the "Check for updates" link rather than inventing a second
+        kind of link: the app already has one way of saying "this is clickable
+        and it leaves the window".
+        """
+        import webbrowser
+
+        widget = tk.Button(
+            parent, text=label, bg=PANEL, fg=MUTED, activebackground=PANEL,
+            activeforeground=AMBER, relief="flat", bd=0, cursor="hand2",
+            font=(MONO[0], 8, "underline"), highlightthickness=0,
+            padx=0, pady=0,
+            command=lambda: webbrowser.open(url))
+        return widget
+
+    def _show_notes_engine_rows(self):
+        """Show only the rows that mean something right now.
+
+        Three things decide the shape of this section, and none of them should
+        need explaining to the person reading it:
+
+        * Ollama's server and model rows do nothing under the built-in engine --
+          editing them leaves the notes byte-identical -- so they go away.
+        * The download button is only useful while the model is missing. Once
+          the weights are here, or the install shipped with them, it is noise.
+        * Engine and model-file are for somebody who has a reason. Off by
+          default, and nothing above depends on them being visible.
+        """
+        import notes_model
+
+        builtin = self.notes_choice_var.get() == "builtin"
+        for widget in self._ollama_rows:
+            widget.grid_remove() if builtin else widget.grid()
+        show_download = builtin and not notes_model.present()
+        for widget in self._download_rows:
+            widget.grid() if show_download else widget.grid_remove()
+
+        # Offer removal only for a copy we downloaded. A bundled model belongs
+        # to the installer and a path the user set belongs to them -- deleting
+        # either from here would be taking something that is not ours.
+        ours = notes_model.source() == "downloaded by this app"
+        for widget in self._remove_rows:
+            widget.grid() if (builtin and ours) else widget.grid_remove()
+        if builtin and ours:
+            self.have_model_var.set(
+                "%s · %d MB in your user folder"
+                % (notes_model.DEFAULT.label,
+                   notes_model.downloaded_size_mb()))
+        for widget in self._advanced_rows:
+            widget.grid() if self.advanced_var.get() else widget.grid_remove()
+
+    def _notes_choice_changed(self):
+        """Turn the two-way choice into the engine setting behind it.
+
+        "Built in" means whichever embedded engine ships with this release, so
+        the pairing lives with the model spec rather than being spelled out in
+        the UI. Anyone who picked a different embedded engine under Advanced
+        keeps it -- switching to "Built in" from ctranslate2 should not quietly
+        move them to llamacpp.
+        """
+        import notes_model
+        import summarizer
+
+        if self.notes_choice_var.get() == "ollama":
+            engine = "ollama"
+        elif summarizer.needs_model(self.notes_engine_var.get()):
+            engine = self.notes_engine_var.get()
+        else:
+            engine = notes_model.DEFAULT.engine
+        self.notes_engine_var.set(engine)
+        settings.save(SUMMARY_ENGINE=engine)
+        self._show_notes_engine_rows()
+        self._refresh_status_right()
+        self._start_engine_check()
+
+    def _notes_engine_changed(self):
+        """The Advanced engine picker. Keeps the plain choice above in step."""
+        import summarizer
+
+        engine = self.notes_engine_var.get().strip() or "ollama"
+        settings.save(SUMMARY_ENGINE=engine)
+        self.notes_choice_var.set(
+            "builtin" if summarizer.needs_model(engine) else "ollama")
+        self._show_notes_engine_rows()
+        self._refresh_status_right()
+        self._start_engine_check()
+
+    def _remove_notes_model(self):
+        """Delete the model this app downloaded, after asking.
+
+        Only our own copy, and only with a confirmation: it is a gigabyte and
+        getting it back means downloading it again. The engine cache is dropped
+        afterwards so the next summary does not try to load a file that is no
+        longer there.
+        """
+        import notes_model
+
+        size = notes_model.downloaded_size_mb()
+        if not messagebox.askyesno(
+                "Remove the notes model?",
+                "This deletes %s (%d MB) from your user folder.\n\n"
+                "Summaries stop working until you download it again or "
+                "switch to Ollama. Your recordings, transcripts and saved "
+                "notes are not touched."
+                % (notes_model.DEFAULT.label, size)):
+            return
+
+        removed = notes_model.remove()
+        import summarizer
+        summarizer._engine = summarizer._engine_key = None
+        self.status_left.configure(
+            text="Notes model removed." if removed
+            else "Nothing to remove.")
+        self._show_notes_engine_rows()
+        self._refresh_status_right()
+        self._start_engine_check()
+
+    def _download_notes_model(self):
+        """Fetch the built-in model, showing progress, without freezing the UI.
+
+        The work happens on a worker thread and every widget update is posted
+        back through the same queue the rest of this window uses, because
+        touching a tkinter variable from a worker raises "main thread is not in
+        main loop" -- occasionally, and only on someone else's machine.
+        """
+        import notes_model
+
+        self.get_model_btn.configure(state="disabled")
+        self.get_model_bar.pack(side="left", padx=(8, 0))
+        self.get_model_bar.configure(value=0)
+
+        def report(fraction, note):
+            def apply():
+                if fraction is None:
+                    self.get_model_bar.configure(mode="indeterminate")
+                else:
+                    self.get_model_bar.configure(mode="determinate",
+                                                 value=int(fraction * 1000))
+                self.get_progress.set(note)
+            self._ui_q.put(apply)
+
+        def worker():
+            problem = notes_model.download(report)
+
+            def done():
+                self.get_model_btn.configure(state="normal")
+                self.get_model_bar.pack_forget()
+                if problem:
+                    self.get_progress.set(problem)
+                    self.status_left.configure(text="The download did not finish.")
+                else:
+                    self.get_progress.set("Ready.")
+                    self.status_left.configure(text="Notes model installed.")
+                # Rebuild the engine against what is now on disk, and let the
+                # rows re-decide whether the download button still belongs.
+                import summarizer
+                summarizer._engine = summarizer._engine_key = None
+                self._show_notes_engine_rows()
+                self._refresh_status_right()
+                self._start_engine_check()
+            self._ui_q.put(done)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _browse_notes_model(self):
+        """Find the weights for an embedded engine.
+
+        A folder for CTranslate2 and a file for llama.cpp, because that is what
+        each one actually loads -- offering the wrong dialog is how a user ends
+        up with a path the engine will refuse.
+        """
+        if self.notes_engine_var.get() == "ctranslate2":
+            chosen = filedialog.askdirectory(
+                parent=self.root,
+                title="Select a CTranslate2 model folder")
+        else:
+            chosen = filedialog.askopenfilename(
+                parent=self.root, title="Select a .gguf model file",
+                filetypes=[("GGUF model", "*.gguf"), ("All files", "*.*")])
+        if chosen:
+            self.notes_model_var.set(chosen)
+            settings.save(NOTES_MODEL=chosen)
+            self._show_notes_engine_rows()
+            self._refresh_status_right()
+            self._start_engine_check()
+
     def _browse_model(self):
         """Point the speech engine at a converted model folder on disk."""
         chosen = filedialog.askdirectory(
@@ -1567,6 +1965,12 @@ class App:
         self.whisper_var.set(current.get("WHISPER_MODEL") or "")
         self.ollama_var.set(current.get("OLLAMA_MODEL") or "")
         self.ollama_url_var.set(current.get("OLLAMA_URL") or "")
+        self.notes_engine_var.set(current.get("SUMMARY_ENGINE") or "ollama")
+        self.notes_model_var.set(current.get("NOTES_MODEL") or "")
+        self.notes_choice_var.set(
+            "ollama" if (current.get("SUMMARY_ENGINE") or "ollama") == "ollama"
+            else "builtin")
+        self._show_notes_engine_rows()
         self._refresh_profile()
         self._show_language_warning()
         self._refresh_status_right()
@@ -1579,14 +1983,62 @@ class App:
             OLLAMA_URL=self.ollama_url_var.get().strip() or config.OLLAMA_URL,
             # Blank means "use faster-whisper", which is None, not "".
             CUSTOM_TRANSCRIBER=self.custom_stt_var.get().strip() or None,
+            SUMMARY_ENGINE=self.notes_engine_var.get().strip() or "ollama",
+            NOTES_MODEL=self.notes_model_var.get().strip(),
         )
         self.status_left.configure(text="Model settings saved.")
+        self._show_notes_engine_rows()
         self._refresh_status_right()
-        threading.Thread(target=self._check_ollama, daemon=True).start()
+        self._start_engine_check()
 
-    def _check_ollama(self):
+    def _start_engine_check(self):
+        """Probe the notes engine on a worker, reading Tk state before leaving.
+
+        The read has to happen here. Tcl interpreters are not thread-safe, and
+        ``notes_choice_var.get()`` used to be the first statement *inside* the
+        worker -- it raised outright the first time this screen was driven from
+        a test harness, and in the running app it was a data race that happened
+        to work. Every UI write in ``_check_ollama`` already goes through
+        ``self._ui_q`` for exactly this reason; the one read had slipped past
+        the rule.
+
+        One helper rather than the same two lines at eight call sites, because
+        the first version of this fix passed the value at one of them and left
+        the other seven defaulting to "ollama" -- which would have hidden the
+        "not downloaded yet" message for the built-in engine.
+        """
+        try:
+            choice = self.notes_choice_var.get()
+        except Exception:                          # noqa: BLE001
+            choice = "ollama"                      # before the row is built
+        threading.Thread(target=self._check_ollama, args=(choice,),
+                         daemon=True).start()
+
+    def _check_ollama(self, choice="ollama"):
+        """Report on whatever writes the notes -- not necessarily Ollama.
+
+        ``check_ollama`` has been an alias for ``check_notes_engine`` since the
+        engine became pluggable, so this line was already telling the truth
+        while sitting beside an Ollama-only control that was not. It now sits on
+        the notes-engine row, where what it says matches what it is next to.
+        """
+        import notes_model
+
+        # A model nobody has downloaded yet is not a fault. A red cross beside
+        # a Download button reads as "something is broken" when the honest
+        # message is "this step has not been done", and the button next to it
+        # is already the answer -- so say that instead, quietly.
+        if choice is None:                        # a caller that has no value
+            choice = "ollama"                     # to give cannot be on a thread
+        if choice == "builtin" and not notes_model.present():
+            waiting = "Not downloaded yet - about %d MB." % (
+                notes_model.DEFAULT.size_mb,)
+            self._ui_q.put(lambda: self.notes_status.configure(
+                text=waiting, style="Muted.TLabel"))
+            return
+
         ok, detail = engine_mod.check_ollama()
-        self._ui_q.put(lambda: self.ollama_label.configure(
+        self._ui_q.put(lambda: self.notes_status.configure(
             text=("✓ " if ok else "✗ ") + detail,
             style="Good.TLabel" if ok else "Bad.TLabel"))
 

@@ -118,10 +118,78 @@ Leave it on `cpu`/`int8` otherwise.
 
 ## 2. The summary model
 
-Summaries are written by whatever Ollama has installed. Recording and
-transcription do not need Ollama at all — without it you still get a full
-timestamped transcript, and only the `-notes.md` summary is skipped. The
-transcript keeps its timestamps; the summary never has them.
+Summaries are written by whatever **notes engine** is configured. Ollama is the
+default and, today, the only one enabled. Recording and transcription do not
+need it at all — without it you still get a full timestamped transcript, and
+only the `-notes.md` summary is skipped. The transcript keeps its timestamps;
+the summary never has them.
+
+### Choosing an engine
+
+The speech side has always been open: any model name, any folder, or a custom
+engine. The notes side now works the same way, because "no model lock-in" ought
+to mean both halves of the product.
+
+| Engine | What it needs | Status |
+|---|---|---|
+| `ollama` | Ollama installed | **Default.** A model manager as well as a runtime |
+| `ctranslate2` | a converted model folder in `NOTES_MODEL` | Working, not yet the default |
+| `llamacpp` | a `.gguf` in `NOTES_MODEL`, plus `llama-cpp-python` | Working, not yet the default |
+
+The two embedded engines run the model inside Vlocalhost, with no second
+process to install — which is the whole point of them. Both have been run
+end to end against Qwen2.5-1.5B-Instruct and produce correct notes. Neither is
+the default yet: which one ships is a measurement, not a preference.
+
+Select one before its weights exist and it refuses immediately, naming what is
+missing, rather than failing somewhere less obvious later.
+
+```bash
+python vlocalhost.py --set SUMMARY_ENGINE=llamacpp
+python vlocalhost.py --set NOTES_MODEL="D:\models\qwen2.5-1.5b-instruct-q4_k_m.gguf"
+```
+
+**A note if you write your own conversion.** Instruct models need their turns
+marked up, and neither embedded runtime applies a chat template on your behalf
+— CTranslate2's `Generator` is a raw next-token loop, and llama-cpp's plain
+call is too. Handed a bare prompt, Qwen2.5-Instruct continued the transcript
+instead of summarising it: forty repetitions of one line, and 210 seconds
+because nothing told it to stop. Vlocalhost applies ChatML for CTranslate2 and
+uses llama-cpp's chat API, so this is handled — but it is the failure to expect
+if you plug in a model that expects some other markup.
+
+### Write your own
+
+The same shape as a custom speech engine. Two methods are required:
+
+```python
+# my_notes.py — anywhere on your PYTHONPATH
+class MyNotes:
+    def summarize(self, transcript: str) -> str:
+        """The transcript -> Markdown notes."""
+        return my_model.run(transcript)
+
+    def title(self, transcript: str) -> str:
+        """A short title, or "" if you cannot produce one."""
+        return ""
+```
+
+```bash
+python vlocalhost.py --set CUSTOM_SUMMARIZER=my_notes:MyNotes
+```
+
+Two optional methods make it a better citizen: `status()` returning
+`(ok, detail)` so Settings and `--diagnose` can report on it, and
+`model_label()` for the status bar. Leave them out and the app falls back to
+your class's name.
+
+You do not have to handle prompts, the notes language, or stripping timestamps
+— Vlocalhost does all of that around your engine, so every backend behaves the
+same way without knowing about any of it.
+
+**This is the one setting that can send a transcript somewhere we do not
+control.** A custom engine reaches wherever you point it, including a cloud
+endpoint. `--network` says so plainly rather than burying it.
 
 ### Use a different model
 

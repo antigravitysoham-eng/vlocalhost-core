@@ -240,6 +240,8 @@ class Wizard:
         self.back_btn.pack(side="left")
         self.next_btn.pack(side="right")
 
+        self._style_dropdowns()
+
         self.steps = [self._step_welcome, self._step_language, self._step_speech,
                       self._step_summaries, self._step_done]
         self.index = 0
@@ -247,6 +249,51 @@ class Wizard:
 
         self.root.protocol("WM_DELETE_WINDOW", self._close)
         self.root.bind("<Escape>", lambda _e: self._close())
+
+    def _style_dropdowns(self):
+        """Make the two read-only pickers here readable.
+
+        The wizard draws almost everything with plain tk widgets and explicit
+        colours, so it never needed a ttk theme -- but its language picker and
+        its Ollama model picker are ttk comboboxes, and those inherit whatever
+        the default theme does with ``readonly``: pale text on a pale field,
+        which is unreadable against the rest of this window.
+        """
+        from tkinter import ttk as _ttk
+
+        s = _ttk.Style(self.root)
+        try:
+            s.theme_use("clam")
+        except Exception:                          # noqa: BLE001 - theme absent
+            pass
+        s.configure("TCombobox", fieldbackground=INK, background=EDGE,
+                    foreground=PAPER, arrowcolor=AMBER,
+                    selectbackground=INK, selectforeground=PAPER)
+        s.map("TCombobox",
+              fieldbackground=[("readonly", INK), ("disabled", PANEL)],
+              foreground=[("readonly", PAPER), ("disabled", MUTED)],
+              selectbackground=[("readonly", INK), ("focus", INK)],
+              selectforeground=[("readonly", PAPER), ("focus", PAPER)],
+              background=[("active", EDGE), ("readonly", EDGE)])
+        for option, value in (
+                ("*TCombobox*Listbox.background", PANEL),
+                ("*TCombobox*Listbox.foreground", PAPER),
+                ("*TCombobox*Listbox.selectBackground", AMBER),
+                ("*TCombobox*Listbox.selectForeground", INK)):
+            self.root.option_add(option, value)
+
+        # Tk binds the mouse wheel on a combobox to *change its value*. On a
+        # settings page that also scrolls, both happen at once: the page moves
+        # and whichever dropdown passed under the pointer silently takes a new
+        # value -- and these save on change, so scrolling past the speech model
+        # rewrites it to something the user never chose. Found by doing exactly
+        # that: a scroll turned "base" into "small" and wrote it to disk.
+        #
+        # Replace the class binding with a no-op rather than returning "break".
+        # The page scroll is a bind_all handler, which runs after the class
+        # binding, so swallowing the event would fix the value and break the
+        # scrolling instead.
+        self.root.bind_class("TCombobox", "<MouseWheel>", lambda _e: None)
 
     # -- frame plumbing ----------------------------------------------------
     def _clear(self):
@@ -272,7 +319,8 @@ class Wizard:
     def _remember(self):
         """Hold on to this page's answers: leaving it destroys its widgets, and
         a rebuilt page must come back with what the user already chose."""
-        for name in ("notes_dir", "language", "profile", "custom_model"):
+        for name in ("notes_dir", "language", "profile", "custom_model",
+                     "notes_kind"):
             var = getattr(self, name, None)
             if var is not None:
                 self.choices[name] = var.get()
@@ -423,30 +471,147 @@ class Wizard:
             self.custom_model.set(chosen)
 
     def _step_summaries(self):
+        """Who writes the summaries: something we can install, or your Ollama.
+
+        Ordered so that the first thing on screen is a choice a person can make
+        without knowing anything -- not a probe result about software they may
+        never have heard of. The old step opened with "Ollama isn't running on
+        this machine", which reads as a problem to solve before you are allowed
+        to continue, when in fact there was never anything to install.
+        """
+        import notes_model
+
         self._heading(
             "Written summaries (optional)",
-            "Recording and transcription work without this. Summaries are "
-            "written by a second model running locally, through Ollama.")
+            "Recording and transcription work without this. You always get a "
+            "full transcript; this decides who writes the summary.")
 
         self.url = tk.StringVar(value=getattr(config, "OLLAMA_URL", ""))
         self.llm = tk.StringVar(value=getattr(config, "OLLAMA_MODEL", DEFAULT_LLM))
-        self.status = tk.StringVar(value="Looking for Ollama…")
+        self.status = tk.StringVar(value="")
         self.progress_text = tk.StringVar(value="")
+        self.notes_kind = tk.StringVar(
+            value=self.choices.get("notes_kind", "builtin"))
+        # True once the person has actually picked. Until then the first probe
+        # is allowed to move the default to whatever this machine already has,
+        # because pushing a gigabyte at somebody who already runs Ollama is a
+        # worse first impression than either option on its own.
+        self._kind_touched = "notes_kind" in self.choices
 
         card = tk.Frame(self.body, bg=PANEL, highlightbackground=EDGE,
                         highlightthickness=1, padx=16, pady=14)
         card.pack(fill="x", pady=(18, 0))
+
+        spec = notes_model.DEFAULT
+        options = (
+            ("builtin", "Built in",
+             "one download, about %d MB, nothing else to install" % spec.size_mb),
+            ("ollama", "Use Ollama",
+             "if you already have it, or want to pick your own models"),
+            ("skip", "Not now",
+             "you still get a full transcript of every meeting"),
+        )
+        for value, title, blurb in options:
+            row = tk.Frame(card, bg=PANEL)
+            row.pack(fill="x", anchor="w", pady=3)
+            tk.Radiobutton(row, text=title, value=value,
+                           variable=self.notes_kind, command=self._kind_changed,
+                           font=_BODY, bg=PANEL, fg=PAPER, selectcolor=INK,
+                           activebackground=PANEL, activeforeground=PAPER,
+                           highlightthickness=0, bd=0).pack(side="left")
+            tk.Label(row, text=blurb, font=_BODY, bg=PANEL, fg=MUTED).pack(
+                side="left", padx=(6, 0))
+
         tk.Label(card, textvariable=self.status, font=_BODY, bg=PANEL,
-                 fg=PAPER, wraplength=500, justify="left").pack(anchor="w")
+                 fg=PAPER, wraplength=500, justify="left").pack(anchor="w",
+                                                                pady=(10, 0))
 
         self.model_row = tk.Frame(card, bg=PANEL)
-        self.model_row.pack(fill="x", pady=(12, 0))
+        self.model_row.pack(fill="x", pady=(10, 0))
 
         self.bar = ttk.Progressbar(card, mode="determinate", maximum=1000)
         self.progress_label = tk.Label(card, textvariable=self.progress_text,
                                        font=_MONO, bg=PANEL, fg=MUTED)
 
+        self._render_kind()
+        # Probe regardless of the current choice: its only other job is to move
+        # an untouched default onto Ollama when this machine plainly has it.
         self.root.after(60, self._probe_ollama)
+
+    def _licence_link(self, parent, label, url):
+        """The model's terms, as a link, next to the button that installs it."""
+        import webbrowser
+
+        return tk.Button(
+            parent, text=label, bg=PANEL, fg=MUTED, activebackground=PANEL,
+            activeforeground=AMBER, relief="flat", bd=0, cursor="hand2",
+            font=(_MONO[0], 8, "underline"), highlightthickness=0,
+            padx=0, pady=0, command=lambda: webbrowser.open(url))
+
+    def _kind_changed(self):
+        self._kind_touched = True
+        self.choices["notes_kind"] = self.notes_kind.get()
+        self._render_kind()
+
+    def _render_kind(self):
+        """Draw whatever the current choice needs, and nothing it does not."""
+        import notes_model
+
+        if not self._alive(self.model_row):
+            return
+        for child in self.model_row.winfo_children():
+            child.destroy()
+
+        kind = self.notes_kind.get()
+        if kind == "skip":
+            self._cancel_watch()
+            self.status.set(
+                "Summaries are off. Every meeting still gets a full, "
+                "timestamped transcript, and you can turn this on later in "
+                "Settings.")
+            return
+
+        if kind == "builtin":
+            self._cancel_watch()
+            spec = notes_model.DEFAULT
+            if notes_model.present():
+                self.status.set("Ready. %s is on this machine, so there is "
+                                "nothing else to install." % spec.label)
+                return
+            self.status.set(
+                "%s runs inside Vlocalhost -- no second program, no account, "
+                "nothing leaves your computer. It is a one-time download of "
+                "about %d MB." % (spec.label, spec.size_mb))
+            ttk.Button(self.model_row, text="Download (%d MB)" % spec.size_mb,
+                       command=self._start_notes_download).pack(side="left")
+            ttk.Button(self.model_row, text="Setup guide",
+                       command=self._open_summaries_guide).pack(side="left",
+                                                                padx=(8, 0))
+            self._licence_link(self.model_row, spec.licence,
+                               spec.licence_url).pack(side="left", padx=(10, 0))
+            return
+
+        self.status.set("Looking for Ollama...")
+        self._probe_ollama()
+
+    def _start_notes_download(self):
+        """Fetch the built-in model, with the same progress bar as the pull."""
+        import notes_model
+
+        for child in self.model_row.winfo_children():
+            child.destroy()
+        self.bar.pack(fill="x", pady=(12, 4))
+        self.progress_label.pack(anchor="w")
+        self.progress_text.set("starting...")
+        self.next_btn.configure(state="disabled")
+
+        def worker():
+            error = notes_model.download(
+                lambda f, t: self._pull_queue.put(("tick", f, t)))
+            self._pull_queue.put(("notes-done", error, ""))
+
+        threading.Thread(target=worker, daemon=True).start()
+        self.root.after(120, self._drain_pull)
 
     @staticmethod
     def _alive(widget) -> bool:
@@ -486,6 +651,8 @@ class Wizard:
         if not self._alive(self.model_row):
             return
         self._cancel_watch()
+        # Only Ollama's own screen is driven by this. The probe still runs for
+        # the other choices, but purely to decide an untouched default.
         url = self.url.get()
 
         def worker():
@@ -502,6 +669,19 @@ class Wizard:
             reachable, models = self._probe_queue.get_nowait()
         except queue.Empty:
             self.root.after(120, self._drain_probe)
+            return
+
+        # A machine that already runs Ollama with a model installed does not
+        # need a gigabyte downloading at it. Move the default there, but only
+        # while the person has not made the choice themselves.
+        if not self._kind_touched and reachable and any(
+                _base_name(m) for m in models):
+            self._kind_touched = True
+            self.notes_kind.set("ollama")
+            self._render_kind()
+            return
+
+        if self.notes_kind.get() != "ollama":
             return
         self._show_ollama(reachable, models)
 
@@ -590,6 +770,14 @@ class Wizard:
                        command=self._start_pull).pack(side="left")
             ttk.Button(self.model_row, text="Skip",
                        command=self._next).pack(side="left", padx=(10, 0))
+            # Ollama fetches this one, but this button is what asks for it, and
+            # llama3.2 carries conditions nobody was ever shown.
+            import notes_model
+
+            name, url = notes_model.ollama_licence(DEFAULT_LLM)
+            if name:
+                self._licence_link(self.model_row, name, url).pack(
+                    side="left", padx=(10, 0))
 
     def _start_pull(self):
         for child in self.model_row.winfo_children():
@@ -633,6 +821,16 @@ class Wizard:
                         self.status.set(f"That download didn't finish: {a}\n\n"
                                         f"You can skip this and set it up later "
                                         f"from Settings.")
+                        if kind == "notes-done":
+                            self._render_kind()
+                            return
+                    elif kind == "notes-done":
+                        # The engine caches the model it loaded, and it was
+                        # built before this file existed.
+                        import summarizer
+                        summarizer._engine = summarizer._engine_key = None
+                        self._render_kind()
+                        return
                     else:
                         self.llm.set(DEFAULT_LLM)
                     self._probe_ollama()
@@ -690,8 +888,17 @@ class Wizard:
             key = getattr(self, "profile", None)
             key = key.get() if key else "balanced"
             out["Speech model"] = performance.PROFILES[key]["WHISPER_MODEL"]
+        import notes_model
+
+        kind = self.choices.get("notes_kind", "")
         llm = getattr(self, "llm", None)
-        out["Summaries"] = llm.get() if llm and llm.get() else "off for now"
+        if kind == "builtin":
+            out["Summaries"] = notes_model.DEFAULT.label + (
+                "" if notes_model.present() else " (not downloaded yet)")
+        elif kind == "skip":
+            out["Summaries"] = "off for now"
+        else:
+            out["Summaries"] = llm.get() if llm and llm.get() else "off for now"
         return out
 
     def _save(self):
@@ -720,8 +927,19 @@ class Wizard:
             changes["WHISPER_MODEL"] = spec["WHISPER_MODEL"]
             changes["WHISPER_BEAM_SIZE"] = spec["WHISPER_BEAM_SIZE"]
             changes["WHISPER_COMPUTE"] = spec["WHISPER_COMPUTE"]
+        import notes_model
+
+        kind = self.choices.get("notes_kind", "")
+        if kind == "builtin":
+            changes["SUMMARY_ENGINE"] = notes_model.DEFAULT.engine
+        elif kind == "ollama":
+            changes["SUMMARY_ENGINE"] = "ollama"
+        # "skip" writes no engine at all: the shipped default already produces
+        # no summary without a model, and recording a choice the user declined
+        # to make would be putting words in their mouth.
+
         llm = getattr(self, "llm", None)
-        if llm and llm.get().strip():
+        if kind != "builtin" and llm and llm.get().strip():
             changes["OLLAMA_MODEL"] = llm.get().strip()
         url = getattr(self, "url", None)
         if url and url.get().strip():

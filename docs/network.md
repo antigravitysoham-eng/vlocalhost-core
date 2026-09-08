@@ -21,17 +21,20 @@ python vlocalhost.py --network
 | Speech model download | huggingface.co | First run, or when you pick a model you don't have | No |
 | Note model download | registry.ollama.ai, fetched by Ollama | Only from the setup wizard, when you ask for a model you don't have | No |
 | Update check | api.github.com | Only when you press **Check for updates** | No |
-| Note writing | Ollama, on `127.0.0.1` | Every time notes are written | **Yes** |
+| Note writing | the configured engine — ships as Ollama on `127.0.0.1` | Every time notes are written | **Yes** |
 | Single-instance channel | `127.0.0.1` | At launch | No |
 | Calendar sync | Google or Microsoft | Only with a paid package, and an account you connected | No |
 | Emailing notes | Google or Microsoft | Only when you send notes yourself | **Yes** |
 
 Two of those carry your meetings, and both are named plainly rather than buried:
 
-- **Note writing** sends the transcript to a model. At the shipped setting that
-  model is on this computer and the traffic never leaves it. `OLLAMA_URL` is
-  yours to change, and if you point it at another machine your transcripts go
-  there. Nothing else in the app can be redirected this way.
+- **Note writing** sends the transcript to whichever engine is configured. At
+  the shipped setting that is Ollama on this computer and the traffic never
+  leaves it. Two settings can change that, and they are the only two in the app
+  that can: `OLLAMA_URL`, if you point it at another machine, and
+  `CUSTOM_SUMMARIZER`, which runs an engine you chose and reaches wherever you
+  send it. An embedded engine (`ctranslate2`, `llamacpp`) makes no connection at
+  all — the model runs inside Vlocalhost.
 - **Emailing notes** sends your notes to the people you address them to. That
   is the entire purpose of the feature; it happens when you ask and not before.
 

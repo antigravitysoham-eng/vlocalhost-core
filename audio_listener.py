@@ -55,18 +55,101 @@ def rescan_devices():
 
     Refuses while any stream is open, because terminating PortAudio underneath
     a live recording would take the recording with it.
+
+    **This is not a cheap read.** It tears down and re-creates the whole
+    PortAudio library -- every host API on the machine, MME, DirectSound,
+    WASAPI and WDM-KS -- which touches the audio stack globally rather than
+    only this process.
+
+    Confirmed on a live call: doing this and nothing else, opening no stream at
+    all, distorted the user's voice for the people on the other end. It ran on
+    every Start, which is exactly why "the moment I start recording" was the
+    symptom, why the released build did it too, and why nothing about our own
+    stream's format ever explained it. A call in a browser recalibrates its
+    echo canceller against these endpoints and does not survive them being
+    re-enumerated underneath it; a desktop client with its own audio stack
+    shrugs it off. An always-on dictation tool on the same machine never
+    disturbed the call because it never does this.
+
+    So call it when the device list is genuinely wrong, not on the way into
+    every recording. :func:`ensure_device_known` is the guarded version.
     """
     global _open_streams
     with _device_lock:
         if _open_streams:
+            _note_rescan("refused - a stream is open")
             return False
         try:
             sd._terminate()
             sd._initialize()
+            _note_rescan("RE-SCANNED - the audio stack was touched")
         except Exception as e:  # noqa: BLE001 - a stale list beats no audio
             print(f"[audio] could not re-scan devices: {e}", flush=True)
+            _note_rescan(f"failed: {e.__class__.__name__}")
             return False
     return True
+
+
+def _note_rescan(outcome):
+    """Record that a re-scan was asked for, and by whom.
+
+    This is the one call in the file that reaches past our own process, and the
+    one already confirmed to distort a live call on its own. It is supposed to
+    be rare now -- only when a device genuinely cannot be found -- and "supposed
+    to be rare" is not something to take on trust when the symptom it causes is
+    a user's voice breaking up for other people.
+
+    Same shape as ``settings._note_change``: the caller, no values, one line.
+    If this appears in the log on every Start, the guard is not holding and the
+    device list is being rebuilt on the way into every recording after all.
+    """
+    try:
+        import inspect
+        import os
+
+        frame = inspect.currentframe()
+        chain = []
+        # 0 = here, 1 = rescan_devices, 2+ = whoever wanted it.
+        for _ in range(2):
+            frame = frame.f_back if frame else None
+        for _ in range(3):
+            if not frame:
+                break
+            chain.append("%s:%s" % (os.path.basename(frame.f_code.co_filename),
+                                    frame.f_code.co_name))
+            frame = frame.f_back
+
+        import diagnostics
+
+        diagnostics.write("audio: device re-scan %s <- %s"
+                          % (outcome, " <- ".join(chain) or "unknown"))
+    except Exception:                              # noqa: BLE001
+        pass                                       # never break capture to log
+
+
+def ensure_device_known(spec):
+    """Device indexes for ``spec``, re-scanning only if it cannot be found.
+
+    The reason a re-scan existed at all is a headset plugged in mid-meeting: it
+    is invisible until PortAudio looks again. That case is real, and it is also
+    rare -- and the check for it is cheap, while the re-scan is not. So look
+    first, and pay the cost only when the answer is "that device is not here".
+
+    The common case -- the microphone that was there when the app opened is
+    still there -- now touches nothing, which is what stops a recording from
+    disturbing a call already in progress.
+    """
+    candidates = device_candidates(spec)
+    if candidates:
+        return candidates
+    # The expensive branch. Worth naming the device that could not be found:
+    # a saved INPUT_DEVICE index that no longer resolves would send every
+    # single Start down here, which would look exactly like the guard not
+    # working while in fact it is the setting that is stale.
+    _note_rescan(f"needed - no candidate for {spec!r}")
+    if rescan_devices():
+        return device_candidates(spec)
+    return candidates
 
 
 #: Host APIs to offer, best first, per platform. One physical microphone is
@@ -76,16 +159,26 @@ def rescan_devices():
 #: what makes the list read like the hardware instead of the driver stack.
 #:
 #: The order is measured, not assumed. WASAPI and WDM-KS are the modern APIs
-#: and the obvious first choice, and both **refuse to open at 16 kHz** — they
-#: hand back the device's native 48 kHz or nothing (PaErrorCode -9997 /
-#: -9996). Whisper and webrtcvad both need 16 kHz mono, so an entry a user
-#: cannot record from is worse than one with an abbreviated name. DirectSound
-#: resamples, and reports full names; MME resamples, and truncates. Hence this
-#: order. To re-measure: open a RawInputStream at config.SAMPLE_RATE on every
-#: index sd.query_devices() reports with input channels, and keep the APIs that
-#: do not raise. `python vlocalhost.py --devices` lists what each API offers.
+#: and the obvious first choice, and both refuse to open at 16 kHz — they hand
+#: back the device's native rate or nothing (PaErrorCode -9997 / -9996).
+#:
+#: That used to put WASAPI last and land every recording on MME. It is why a
+#: call in a browser broke up while this app recorded, and why the same call in
+#: a desktop client did not: MME and DirectSound reach the device through a
+#: compatibility layer that puts a sample-rate conversion on the endpoint, and
+#: a browser's capture — WebRTC, on WASAPI at the native rate, with its own
+#: echo canceller and a tight clock — does not survive that. A desktop client
+#: with its own audio stack shrugs it off. The app was the one behaving badly.
+#:
+#: :meth:`MicListener._rates_to_try` now opens at whatever the device actually
+#: runs at and reduces to 16 kHz in software, so WASAPI opens cleanly and is
+#: preferred. Nothing is asked of the endpoint, so nothing else capturing from
+#: it is disturbed — whichever program that happens to be.
+#:
+#: To re-measure: `python vlocalhost.py --devices` lists what each API offers,
+#: and sd.check_input_settings(device=i, samplerate=r) says what each accepts.
 _PREFERRED_HOST_APIS = {
-    "Windows": ("Windows DirectSound", "MME"),
+    "Windows": ("Windows WASAPI", "Windows DirectSound", "MME"),
     "Darwin": ("Core Audio",),
     "Linux": ("PulseAudio", "ALSA"),
 }
@@ -469,6 +562,133 @@ class _Segmenter:
             self.on_utterance(b"".join(voiced), self.label)
 
 
+def _to_mono_16k(pcm, channels, factor):
+    """Device audio -> the mono 16 kHz the rest of the pipeline expects.
+
+    Both conversions happen here rather than being asked of the endpoint.
+    Windows will happily mix channels and resample on the device for you, but
+    on a shared microphone that converter is imposed on every program capturing
+    from it, and a browser's call audio does not survive it.
+
+    Channels are averaged, not picked: this is a microphone *array*, and one
+    element on its own is quieter and off-axis.
+
+    Rate reduction averages each group of ``factor`` samples rather than taking
+    every nth. Dropping samples folds everything above the new Nyquist back
+    into the band as aliasing, which a speech model hears as consonants nobody
+    said. Only exact integer ratios are used (48000 -> 16000 is 3), so there is
+    no resampling error to accumulate.
+    """
+    samples = np.frombuffer(pcm, dtype=np.int16)
+    if channels > 1:
+        usable = (samples.size // channels) * channels
+        if usable == 0:
+            return b""
+        samples = samples[:usable].reshape(-1, channels).astype(np.int32).mean(axis=1)
+    else:
+        samples = samples.astype(np.int32)
+    if factor > 1:
+        usable = (samples.size // factor) * factor
+        if usable == 0:
+            return b""
+        samples = samples[:usable].reshape(-1, factor).mean(axis=1)
+    return samples.astype(np.int16).tobytes()
+
+
+def _use_soundcard_mic():
+    """True when the microphone should be recorded through soundcard."""
+    choice = (getattr(config, "MIC_BACKEND", "auto") or "auto").lower()
+    if choice == "soundcard":
+        return True
+    if choice == "portaudio":
+        return False
+    if platform.system() != "Windows":
+        return False
+    try:
+        import soundcard  # noqa: F401
+    except Exception:                              # noqa: BLE001
+        return False
+    return True
+
+
+class SoundcardMicListener:
+    """The microphone via WASAPI, the same way system audio is captured.
+
+    Deliberately the same shape as :class:`LoopbackListener`, because that path
+    has recorded every meeting this app has ever saved without disturbing
+    anything else on the machine. The only difference is which endpoint it
+    opens.
+
+    Why this exists at all: see config.MIC_BACKEND. PortAudio's input stream,
+    on its own, breaks a browser call's outgoing audio on at least one common
+    laptop audio stack.
+    """
+
+    kind = "microphone"
+
+    def __init__(self, on_utterance, label=None, device=None, on_partial=None):
+        self.label = config.LABEL_ME if label is None else label
+        self.device = device if device is not None else config.INPUT_DEVICE
+        self._seg = _Segmenter(on_utterance, self.label, on_partial=on_partial)
+        self._running = False
+        self._worker = None
+
+    def _pick(self, sc):
+        """The configured microphone, or the default one.
+
+        Matched by name because soundcard has no notion of PortAudio's indexes,
+        and the setting the user chose is a name.
+        """
+        want = (self.device or "").strip()
+        if want:
+            for m in sc.all_microphones(include_loopback=False):
+                if m.name == want or want in m.name or m.name in want:
+                    return m
+        return sc.default_microphone()
+
+    def start(self):
+        if self._running:
+            return
+        self._running = True
+        self._worker = threading.Thread(target=self._loop, daemon=True)
+        self._worker.start()
+
+    def stop(self):
+        self._running = False
+        if self._worker is not None:
+            self._worker.join(timeout=3)
+            self._worker = None
+
+    def _loop(self):
+        import soundcard as sc
+
+        initialized = LoopbackListener._init_com()
+        frame = self._seg.frame_size
+        # Bigger gulps than one VAD frame: asking WASAPI for 32 ms at a time
+        # cannot keep up and it reports dropped audio. Same reason as loopback.
+        chunk = frame * 8
+        try:
+            mic = self._pick(sc)
+            with mic.recorder(samplerate=config.SAMPLE_RATE, channels=1,
+                              blocksize=chunk) as rec:
+                print(f"[audio] microphone via soundcard/WASAPI: {mic.name}",
+                      flush=True)
+                while self._running:
+                    block = rec.record(numframes=chunk)
+                    mono = block[:, 0] if block.ndim > 1 else block
+                    pcm = (np.clip(mono, -1.0, 1.0) * 32767).astype(np.int16)
+                    for start in range(0, len(pcm) - frame + 1, frame):
+                        self._seg.feed(pcm[start:start + frame].tobytes())
+        except Exception as e:  # noqa: BLE001
+            print(f"[audio] microphone stopped: {e}", flush=True)
+        finally:
+            self._seg.flush()
+            if initialized:
+                import ctypes
+
+                ctypes.windll.ole32.CoUninitialize()
+
+
 class MicListener:
     """Your microphone, via PortAudio. Works on every platform."""
 
@@ -485,10 +705,62 @@ class MicListener:
         self._running = False
         self._stream = None
         self._worker = None
+        # What the device is actually opened as, when that differs from the
+        # mono 16 kHz the pipeline wants. Both set by _open().
+        self._decimate = 1
+        self._channels = config.CHANNELS
 
     def _callback(self, indata, frames, time_info, status):
         # Runs on a high-priority audio thread — hand off and return fast.
+        if self._channels > 1 or self._decimate > 1:
+            self._q.put(_to_mono_16k(bytes(indata), self._channels,
+                                     self._decimate))
+            return
         self._q.put(bytes(indata))
+
+    @staticmethod
+    def _formats_to_try(device):
+        """(rate, channels, decimate) triples, best first.
+
+        The device's own format comes first, exactly as it runs: its rate and
+        its channel count. Every difference between what is asked for and what
+        the device is becomes a converter Windows puts on the *endpoint*, and
+        an endpoint converter is imposed on every program capturing from that
+        microphone -- which is why a Teams call in Chrome broke up while this
+        app recorded, and why Wispr Flow, which holds the same microphone all
+        day, does not disturb it.
+
+        The old behaviour asked for 16 kHz mono on a 48 kHz stereo array: two
+        conversions, and 16 kHz is refused by WASAPI and WDM-KS outright, so it
+        also pushed the whole thing onto MME's compatibility path.
+
+        Mono 16 kHz is still tried last, because a device that offers only that
+        must still work.
+        """
+        target = config.SAMPLE_RATE
+        want_ch = config.CHANNELS
+        options = []
+        native_rate = native_ch = 0
+        try:
+            info = sd.query_devices(device) if device is not None else \
+                sd.query_devices(kind="input")
+            native_rate = int(info.get("default_samplerate") or 0)
+            native_ch = int(info.get("max_input_channels") or 0)
+        except Exception:                          # noqa: BLE001
+            pass
+
+        def add(rate, channels):
+            if rate and channels and rate % target == 0:
+                triple = (rate, channels, rate // target)
+                if triple not in options:
+                    options.append(triple)
+
+        add(native_rate, native_ch)                # exactly what the device is
+        add(native_rate, want_ch)                  # right rate, we mix down
+        add(48000, native_ch)
+        add(48000, want_ch)
+        options.append((target, want_ch, 1))       # last resort
+        return options
 
     def _open(self, candidates):
         """Open the first candidate that will actually take our format.
@@ -501,21 +773,30 @@ class MicListener:
         """
         last = None
         for device in candidates:
-            try:
-                return sd.RawInputStream(
-                    samplerate=config.SAMPLE_RATE,
-                    blocksize=self._seg.frame_size,
-                    dtype="int16",
-                    channels=config.CHANNELS,
-                    device=device,
-                    callback=self._callback,
-                )
-            except Exception as e:  # noqa: BLE001 - try the next API's copy
-                last = e
-                if device is not None:
-                    print(f"[audio] device {device} would not open at "
-                          f"{config.SAMPLE_RATE} Hz ({e}); trying another",
+            for rate, channels, decimate in self._formats_to_try(device):
+                try:
+                    stream = sd.RawInputStream(
+                        samplerate=rate,
+                        blocksize=self._seg.frame_size * decimate,
+                        dtype="int16",
+                        channels=channels,
+                        device=device,
+                        callback=self._callback,
+                    )
+                except Exception as e:  # noqa: BLE001 - try the next option
+                    last = e
+                    continue
+                self._decimate = decimate
+                self._channels = channels
+                if decimate > 1 or channels != config.CHANNELS:
+                    print(f"[audio] capturing at {rate} Hz / {channels} ch — "
+                          f"the device's own format — and converting to "
+                          f"{config.SAMPLE_RATE} Hz mono in software",
                           flush=True)
+                return stream
+            if device is not None:
+                print(f"[audio] device {device} would not open ({last}); "
+                      f"trying another", flush=True)
         raise last if last is not None else RuntimeError(
             "No audio input device could be opened.")
 
@@ -523,11 +804,11 @@ class MicListener:
         global _open_streams
         if self._running:
             return
-        # Look at the hardware as it is *now*, not as it was when the app
-        # opened. A headset plugged in during the meeting is the common case,
-        # and before this it was simply invisible.
-        rescan_devices()
-        candidates = device_candidates(self.device)
+        # A headset plugged in during the meeting is invisible until PortAudio
+        # looks again -- but looking again resets the machine's audio stack and
+        # disturbs anything already capturing, a call in a browser above all.
+        # See rescan_devices. So try what we already know about first.
+        candidates = ensure_device_known(self.device)
         if not candidates:
             # Nothing on this machine matches. Raise the message that names
             # what *is* plugged in, rather than a PortAudio error code.
@@ -538,10 +819,25 @@ class MicListener:
             self._stream = self._open(candidates)
             self._stream.start()
         except Exception:
-            # Nothing was opened, so nothing is holding the device list open.
-            self._running = False
+            # The cached enumeration can be stale -- indexes shift when devices
+            # come and go, and the unconditional re-scan this replaced was also
+            # what kept them fresh. So the re-scan still happens, just here,
+            # where the alternative is not recording at all rather than a call
+            # that sounds slightly worse.
             self._stream = None
-            raise
+            retry = []
+            if rescan_devices():
+                retry = device_candidates(self.device)
+            if not retry:
+                self._running = False
+                raise
+            try:
+                self._stream = self._open(retry)
+                self._stream.start()
+            except Exception:
+                self._running = False
+                self._stream = None
+                raise
         with _device_lock:
             _open_streams += 1
         self._worker = threading.Thread(target=self._loop, daemon=True)
@@ -598,13 +894,36 @@ class LoopbackListener:
             return False, ("macOS has no built-in loopback. Install a virtual "
                            "device such as BlackHole, route the call's audio "
                            "into it, and set INPUT_DEVICE in config.py.")
+        # WASAPI is COM, and COM is per-thread. soundcard initialises it at
+        # module import, on whichever thread imports it first -- so this passed
+        # in every isolated test, where that thread happened to be this one,
+        # and failed in the running app, where Settings had already imported
+        # soundcard on another thread and the import here is a no-op. Then the
+        # first WASAPI call returns CO_E_NOTINITIALIZED and this function
+        # blames the hardware for it.
+        initialized = LoopbackListener._init_com()
+        try:
+            return LoopbackListener._probe()
+        finally:
+            if initialized:
+                import ctypes
+
+                ctypes.windll.ole32.CoUninitialize()
+
+    @staticmethod
+    def _probe():
+        """The endpoint checks themselves. COM must already be up.
+
+        Split out so the initialise/uninitialise pair around it stays balanced
+        no matter which branch returns.
+        """
+        import soundcard as sc
+
         # Name the device and say what to do. "No loopback device available"
         # on its own sends people hunting for a driver, when the usual causes
         # are a playback device that changed under the app (a headset
         # connecting) or another program holding it exclusively.
         try:
-            import soundcard as sc
-
             speaker = sc.default_speaker()
         except Exception as e:  # noqa: BLE001
             return False, ("Windows reports no playback device, so there is "
@@ -739,11 +1058,30 @@ def build_listener(on_utterance, on_partial=None):
     if mode not in ("mic", "both", "system"):
         raise ValueError(
             f"CAPTURE_MODE must be 'mic', 'both', or 'system' — got {mode!r}.")
+    # Which library records the microphone. See config.MIC_BACKEND: a bare
+    # PortAudio input stream disturbs a browser call's outgoing audio on some
+    # laptop audio stacks, and soundcard -- already used for system audio on
+    # every recording -- does not go through PortAudio at all.
+    mic_class = SoundcardMicListener if _use_soundcard_mic() else MicListener
+
+    # Which path a recording actually took, written down at the moment it is
+    # chosen. "Is it even using the backend I set" has been guesswork twice in
+    # this investigation, and guessing about it is how a theory gets tested
+    # against the wrong code.
+    try:
+        import diagnostics
+
+        diagnostics.write("audio: start mode=%s mic=%s backend=%s"
+                          % (mode, mic_class.__name__,
+                             getattr(config, "MIC_BACKEND", "auto")))
+    except Exception:                              # noqa: BLE001
+        pass
+
     if mode == "mic":
-        return MicListener(on_utterance, label="", on_partial=on_partial)
+        return mic_class(on_utterance, label="", on_partial=on_partial)
     if mode == "system":
         return LoopbackListener(on_utterance, label="", on_partial=on_partial)
-    return MultiListener([MicListener(on_utterance, on_partial=on_partial),
+    return MultiListener([mic_class(on_utterance, on_partial=on_partial),
                           LoopbackListener(on_utterance, on_partial=on_partial)])
 
 

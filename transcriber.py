@@ -56,6 +56,43 @@ def _load_custom(spec):
     return obj() if callable(obj) else obj
 
 
+def _prepare_model_env():
+    """Point Hugging Face at the bundled models, and stop it phoning home.
+
+    Two environment variables, set before faster-whisper imports its downloader
+    because that is when the library reads them.
+
+    ``HF_HUB_DISABLE_TELEMETRY`` because a product whose claim is that nothing
+    leaves the machine should not ship a library that reports usage on the one
+    occasion it does reach the network. The exposure is small -- a genuine
+    first-run download -- and closing a small hole costs one line.
+
+    ``HF_HUB_CACHE`` because an installer that ships the weights needs the
+    library to look where they were put. With it set, first run finds the model
+    already present and the download never happens, which is what makes an
+    air-gapped install work.
+    """
+    import os
+
+    os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+    bundled = getattr(config, "BUNDLED_MODELS_DIR", "") or ""
+    if bundled and os.path.isdir(bundled):
+        os.environ.setdefault("HF_HUB_CACHE", bundled)
+
+
+def _revision_for(name):
+    """The pinned revision for a model name, or None to track the head.
+
+    Only meaningful for a name or repo id. A local folder carries no revision,
+    and passing one for a path would be a lie about what is loaded.
+    """
+    import os
+
+    if os.path.isdir(name):
+        return None
+    return (getattr(config, "WHISPER_REVISION", None) or {}).get(name)
+
+
 def _build_model(name):
     """Construct a faster-whisper model, honouring Sealed Mode.
 
@@ -76,6 +113,7 @@ def _build_model(name):
     a switch called Sealed Mode, so it is replaced with one that names the
     cause and both ways out.
     """
+    _prepare_model_env()
     from faster_whisper import WhisperModel
 
     def build(local_only):
@@ -85,6 +123,7 @@ def _build_model(name):
             compute_type=config.WHISPER_COMPUTE,
             cpu_threads=getattr(config, "WHISPER_CPU_THREADS", 0),
             local_files_only=local_only,
+            revision=_revision_for(name),
         )
 
     try:

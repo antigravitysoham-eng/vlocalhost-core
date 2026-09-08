@@ -148,6 +148,13 @@ def interpreter(runtime):
     raise SystemExit(f"no interpreter found in {runtime}")
 
 
+#: Prebuilt llama.cpp wheels. PyPI ships only an sdist for this package, so
+#: without this index the built-in note writer cannot be installed without a
+#: C++ toolchain. Recorded here rather than inside the pip call so that a
+#: reviewer asking "what else does this build trust" finds one answer.
+LLAMA_CPP_INDEX = "https://abetlen.github.io/llama-cpp-python/whl/cpu"
+
+
 def install_dependencies(runtime):
     """Install requirements straight into the shipped interpreter."""
     python = interpreter(runtime)
@@ -161,7 +168,18 @@ def install_dependencies(runtime):
     subprocess.run([python, "-m", "pip", "install", "--upgrade", "pip",
                     "--disable-pip-version-check", "-q"], check=True)
     install = [python, "-m", "pip", "install", "-r", requirements,
-               "--disable-pip-version-check", "-q"]
+               "--disable-pip-version-check", "-q",
+               # llama-cpp-python is the one dependency PyPI has no wheel for.
+               # The index below is the maintainer's own, and is deliberately
+               # an *extra* index rather than a replacement: everything else
+               # still resolves from PyPI, so this widens the supply chain by
+               # exactly one package instead of moving all of them.
+               "--extra-index-url", LLAMA_CPP_INDEX,
+               # Never compile. Without this, a platform with no matching wheel
+               # falls back to the sdist and the build either takes an hour or
+               # fails on a machine with no C++ toolchain -- and the failure
+               # would be a surprise at release time rather than a decision.
+               "--only-binary", "llama-cpp-python"]
     if os.path.exists(constraints):
         install += ["-c", constraints]
     else:

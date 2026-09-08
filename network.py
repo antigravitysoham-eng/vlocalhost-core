@@ -132,6 +132,19 @@ CONNECTIONS: tuple[Connection, ...] = (
         sealable=True,
     ),
     Connection(
+        key="notes_model_download",
+        label="Note model download (built-in engine)",
+        host="huggingface.co",
+        when="Only when you ask for the built-in note writer and this machine "
+             "does not have its model yet. Never on a timer, and never if the "
+             "install already shipped with the weights.",
+        carries="A request for one public file, at a pinned revision.",
+        learns="That some address downloaded a public file, the same thing it "
+               "learns from a browser.",
+        content=False,
+        sealable=True,
+    ),
+    Connection(
         key="local_control",
         label="Single-instance control channel",
         host="127.0.0.1 - this machine",
@@ -311,6 +324,7 @@ def _wrap(text: str, width: int, indent: int) -> list[str]:
 EXPECTED_CALLERS = {
     "updates.py": "update_check",
     "transcriber.py": "model_download",
+    "notes_model.py": "notes_model_download",
     # All four reach Ollama at ``config.OLLAMA_URL`` -- writing notes, and
     # asking which models are installed. The audit reads source and cannot tell
     # a loopback address from any other, so the judgement is recorded here

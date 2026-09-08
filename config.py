@@ -105,10 +105,25 @@ PARTIAL_INTERVAL_MS = 500
 # a 30-second window, so half a second of audio costs the same to decode as
 # eight seconds (1834 ms against 1859 ms, measured). Model size is the only one.
 PARTIAL_MODEL = None
-
 # Ignore blips shorter than this (coughs, clicks) to avoid junk transcripts.
 MIN_UTTERANCE_MS = 300
 
+# Which library records the microphone.
+#
+#   "soundcard"  WASAPI directly, the same path system audio already uses
+#   "portaudio"  the historical path, via sounddevice
+#   "auto"       soundcard on Windows, PortAudio elsewhere
+#
+# This is not a preference about code. A bare PortAudio input stream -- no
+# voice detection, no model, none of this application -- distorted a user's
+# voice for the other people on a Teams call in Chrome, reproducibly, and
+# stopped the moment the stream closed. An always-on dictation tool on the same
+# machine never did, and it is an Electron app: it captures through Chromium's
+# audio engine, which is what the call itself uses.
+#
+# soundcard is not a new dependency; it is what records system audio today, on
+# every recording, and has done so without this problem.
+MIC_BACKEND = "auto"
 # --- Transcription: bring your own voice model ---------------------------
 # The speech-to-text engine. Default is faster-whisper, running fully local.
 # There is NO model limitation — attach the model you want, three ways:
@@ -128,7 +143,57 @@ MIN_UTTERANCE_MS = 300
 # "base" is the default: multilingual, keeps up with live speech on modest
 # hardware, ~340 MB. See performance.py for the measured profiles — "tiny" for
 # weak machines, "small" when you need the accuracy and have the cores.
-WHISPER_MODEL = "base"
+# "tiny", not "base", and the reason is not accuracy.
+#
+# `base` running on this machine distorted the user's own voice for the other
+# people on a browser call, for as long as a recording was running. Measured on
+# a live call, everything else held equal:
+#
+#     no speech model at all            clean
+#     base, 12 threads                  distorted
+#     base, 4 threads                   WORSE -- the load stretches, not shrinks
+#     base, below-normal priority       no change
+#     base + OMP_WAIT_POLICY=PASSIVE    better, still audible
+#     tiny                              clean
+#
+# Six other explanations were tested on that call and eliminated: the device
+# re-scan, the sample-rate conversion, the channel remix, the loopback stream,
+# the mic backend, and the thread count. Capture is innocent in every form --
+# opening the microphone and discarding the audio disturbs nothing. It is the
+# decode that starves the call, and priority not helping while fewer threads
+# made it worse points at memory bandwidth rather than CPU time.
+#
+# So the default is the model that does not spoil the meeting it is recording.
+# A worse transcript is a cost the user can see and correct; sounding broken to
+# everyone else is one they cannot, and they will not know it is us.
+#
+# Set "base" or "small" for a better transcript when nothing else needs the
+# machine -- recording a room, or a call in a desktop client rather than a
+# browser. The real fix is a cheaper architecture: a streaming transducer costs
+# a fraction of an encoder-decoder per second of audio. See the notes on
+# Parakeet in the release-and-security policy.
+WHISPER_MODEL = "tiny"
+# Which revision of a Hugging Face model to fetch. Unpinned, you get whatever
+# is at the head of the repo on the day you install -- so two machines running
+# "base" can hold different weights, and a change upstream arrives without
+# anyone deciding to take it. Pinning makes the download reproducible and is
+# the difference between "we ship Whisper" and "we ship this Whisper" in a
+# security review.
+#
+# Applies only to models fetched by name or repo id. A local folder is already
+# pinned by virtue of being a folder. Set to None to track the head again.
+WHISPER_REVISION = {
+    "tiny":  None,
+    "base":  "ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66",
+    "small": None,
+}
+
+# Where a bundled copy of the models lives, for an installer that ships them.
+# When set, this is used as the Hugging Face cache, so a first run finds the
+# weights already present and never reaches the network. Empty means the
+# ordinary per-user cache.
+BUNDLED_MODELS_DIR = ""
+
 # "int8" is fast on CPU. Use "float16" if you have a good GPU + CUDA.
 WHISPER_COMPUTE = "int8"
 WHISPER_DEVICE = "cpu"       # "cpu" or "cuda"
@@ -137,6 +202,8 @@ WHISPER_DEVICE = "cpu"       # "cpu" or "cuda"
 # less accurate. Raise to 5 for the best transcription at 2-3x the CPU cost.
 WHISPER_BEAM_SIZE = 1
 
+# Threads for the speech model. 0 lets CTranslate2 choose (usually all cores).
+# Set 2 on a small machine to leave the rest of the system responsive.
 # Threads for the speech model. 0 lets CTranslate2 choose (usually all cores).
 # Set 2 on a small machine to leave the rest of the system responsive.
 WHISPER_CPU_THREADS = 0
@@ -187,6 +254,17 @@ CUSTOM_TRANSCRIBER = None
 # summarizer.py and every backend inherits it.
 SUMMARY_ENGINE = "ollama"
 
+# Where the weights are, for the engines that run a model in this process
+# ("ctranslate2" or "llamacpp"). A .gguf file for llamacpp, a converted model
+# folder for ctranslate2. Unused by "ollama", which manages its own models.
+#
+# Empty until an embedded engine is chosen. Both are written and neither is
+# enabled: which one we ship is a measurement (5-build/run_model_bench.py),
+# not a preference, and CTranslate2 starts ahead on a technicality worth
+# stating -- faster-whisper already runs on it, so it adds no dependency, no
+# licence and no platform matrix.
+NOTES_MODEL = ""
+
 # "module.path:ClassName" of a notes engine to use instead of the built-in --
 # an embedded llama.cpp, an LM Studio or llama-server endpoint, a model you
 # converted yourself. It needs two methods, summarize(transcript) and
@@ -204,6 +282,44 @@ CUSTOM_SUMMARIZER = None
 # this one, so `--network` names it explicitly rather than assuming loopback.
 OLLAMA_URL = "http://localhost:11434"
 OLLAMA_MODEL = "llama3.2"    # pull first:  ollama pull llama3.2
+
+# How much context to ask Ollama for. This used to go unsent, which meant the
+# ceiling was whatever the user's Ollama defaulted to -- 16 384 on the version
+# measured here, 4 096 on older ones -- and Ollama does not refuse a prompt
+# that is too long, it quietly drops the front of it. So the same hour-long
+# meeting could produce whole notes on one machine and notes describing only
+# its second half on another, with nothing saying which had happened.
+#
+# Naming it makes the ceiling ours. A meeting that does not fit is summarised
+# in parts by `rolling.py` rather than being silently cut.
+#
+# 16384 and not 8192, which is where this started and which was wrong. The
+# number decides when a meeting stops being summarised in one call and starts
+# being summarised in parts, and parts are measurably the worse of the two --
+# on one meeting run both ways, one call recovered 5 of 17 known facts and
+# chunking 2, and only the chunked notes carried lines like "we are about
+# halfway through the agenda". Chunking is what happens when the alternative is
+# nothing, not a thing to reach for early.
+#
+#     num_ctx    one call up to
+#       8 192    ~3 400 words   ~22 minutes of speech
+#      16 384    ~8 200 words   ~54 minutes of speech
+#
+# At 8192 an ordinary hour-long meeting would take the worse path. At 16384 the
+# common case stays on the better one and chunking is reserved for the genuinely
+# long meeting, where what it replaces is Ollama quietly dropping the first half.
+#
+# It costs memory, and it is not a new cost: Ollama 0.33 already loads 16384 by
+# default, so this asks for what a current install was giving anyway. Lower it
+# on a machine that cannot spare the RAM -- the notes stay correct, more of them
+# just go through `rolling.py`.
+OLLAMA_NUM_CTX = 16384
+
+# Words per part when a meeting is too long to summarise in one call. Measured
+# on an 8 755-word meeting: 300 words cost 527s of model time for no benefit,
+# 500 cost 209s, 800 cost 187s. Below about 800 the extra parts cost more than
+# they buy, because every part is another line the final merge has to read.
+NOTES_CHUNK_WORDS = 800
 
 # --- Output --------------------------------------------------------------
 # Where transcripts and summaries are written. A plain name lands inside your

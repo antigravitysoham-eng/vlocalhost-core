@@ -313,7 +313,16 @@ class NoteTaker:
         notes = None
         summary_path = _unique(os.path.join(out_dir, f"{base}-summary.txt"))
         try:
-            notes = to_plain_text(summarize(transcript))
+            # A meeting too long for the model's context window is summarised in
+            # parts, and that takes minutes rather than seconds. Say so as it
+            # goes: the window is already showing this transcript, so the line
+            # lands where the user is looking, and a long silence after Stop is
+            # indistinguishable from a hang.
+            def progress(done, total):
+                if total > 1:
+                    self.on_line(f"[notes] summarising part {done} of {total}...")
+
+            notes = to_plain_text(summarize(transcript, on_progress=progress))
             with open(summary_path, "w", encoding="utf-8") as f:
                 # No timestamp in the heading. The date is already in the
                 # filename, and a summary that opens with a clock time reads

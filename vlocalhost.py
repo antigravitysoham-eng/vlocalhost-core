@@ -32,6 +32,32 @@ import os
 import sys
 import threading
 
+# Set before anything can import CTranslate2, which reads these once when its
+# thread pool is built. Anywhere later in the file is too late.
+#
+# The speech model's worker threads spin-wait between batches by default --
+# they burn a core each doing nothing rather than sleeping, and that costs
+# memory bandwidth as well as CPU time. On this machine it was enough to
+# distort the user's own voice for the other people on a browser call, for the
+# whole time a recording was running.
+#
+# Measured on a live call, `base` on 12 logical cores, everything else equal:
+#
+#     no speech model at all      clean
+#     spin-waiting (the default)  distorted
+#     PASSIVE + KMP_BLOCKTIME=0   noticeably better, still audible
+#     `tiny` instead of `base`    clean
+#
+# So this is not the whole answer -- the remaining cost is the decode itself,
+# and that needs a cheaper model rather than a cheaper wait. It is kept because
+# it is free: nothing is given up for it, and it is the difference between bad
+# and merely imperfect while the real fix is decided.
+#
+# setdefault, not assignment: somebody who has tuned these deserves to keep
+# their values.
+os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
+os.environ.setdefault("KMP_BLOCKTIME", "0")
+
 import config
 import settings
 
@@ -333,6 +359,16 @@ def run_set(pairs):
     settings.save(**changes)
     for key, value in sorted(changes.items()):
         print(f"{key} = {value!r}", flush=True)
+
+    # A warning rather than a refusal, because this command is also how an
+    # installer writes settings, and it may legitimately point at weights it
+    # is about to copy. Saying it here is still worth the two lines: the
+    # engine will refuse to build later, and --set is the moment a person
+    # still has the wrong path in front of them.
+    notes_model = changes.get("NOTES_MODEL")
+    if notes_model and not os.path.exists(notes_model):
+        print(f"\nWarning: {notes_model} does not exist. Notes will "
+              f"refuse to run until it does.", flush=True)
     print(f"\nSaved to {settings.path()}", flush=True)
     return 0
 

@@ -28,6 +28,9 @@ _FILE = "settings.json"
 EDITABLE = (
     "CAPTURE_MODE",
     "INPUT_DEVICE",
+    # Which library records the microphone. Adjustable because the right answer
+    # depends on what else is capturing on that machine.
+    "MIC_BACKEND",
     "VAD_ENGINE",
     "VAD_THRESHOLD",
     "SILENCE_TIMEOUT_MS",
@@ -49,6 +52,12 @@ EDITABLE = (
     "NOTES_LANGUAGE",
     "OLLAMA_URL",
     "OLLAMA_MODEL",
+    # The context window asked of Ollama, and the size of a part when a meeting
+    # is too long for one call. Editable because both are trades against the
+    # machine: more context needs more RAM, larger parts mean fewer but heavier
+    # model calls, and the right answer is a property of the hardware.
+    "OLLAMA_NUM_CTX",
+    "NOTES_CHUNK_WORDS",
     "OUTPUT_DIR",
     # "module:ClassName" of a speech engine to use instead of faster-whisper.
     # This imports and runs code the user names, so the Settings tab keeps it
@@ -62,6 +71,7 @@ EDITABLE = (
     # editing config.py is reverted by the next update.
     "SUMMARY_ENGINE",
     "CUSTOM_SUMMARIZER",
+    "NOTES_MODEL",
     # How often the local, network-free update reminder fires. 0 turns it off.
     "UPDATE_REMINDER_DAYS",
     # The system-wide key that starts and stops a recording, and its off
@@ -111,11 +121,44 @@ def current() -> dict:
     return {k: getattr(config, k, None) for k in EDITABLE}
 
 
+def _note_change(changes: dict) -> None:
+    """Log what changed and which function asked for it.
+
+    Every writer here is meant to be a deliberate user action -- a button, a
+    picker, ``--set``. When a setting moves and nobody remembers moving it,
+    the only honest answer without this line is "I do not know", and that
+    happened: SUMMARY_ENGINE changed during a session and the caller could not
+    be identified afterwards from anything on disk.
+
+    One line, the keys and the caller, no values: a setting can hold a path or
+    a server address, and the log is attached to support reports.
+    """
+    try:
+        import inspect
+
+        frame = inspect.currentframe()
+        caller = "unknown"
+        # 0 = here, 1 = save(), 2 = whoever called save().
+        for _ in range(2):
+            frame = frame.f_back if frame else None
+        if frame:
+            caller = "%s:%s" % (os.path.basename(frame.f_code.co_filename),
+                                frame.f_code.co_name)
+        import diagnostics
+
+        diagnostics.write("settings: %s written by %s"
+                          % (", ".join(sorted(changes)), caller))
+    except Exception:                              # noqa: BLE001
+        pass                                       # never break a save
+
+
 def save(**changes) -> dict:
     """Persist ``changes`` and apply them to :mod:`config` immediately."""
     unknown = [k for k in changes if k not in EDITABLE]
     if unknown:
         raise KeyError(f"Not user-editable: {', '.join(sorted(unknown))}")
+
+    _note_change(changes)
 
     data = load()
     data.update(changes)

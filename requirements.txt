@@ -22,6 +22,27 @@ Pillow==12.3.0
 # Only for "Benchmark this machine" in Settings; everything else works without it.
 psutil==7.2.2
 
+# The built-in note writer. Runs a GGUF inside this process, so a summary needs
+# no second program installed -- which is the whole reason it is here.
+#
+# Not on PyPI as a wheel: PyPI carries an sdist only, and building it needs a
+# C++ toolchain no user is going to have. The maintainer publishes prebuilt
+# wheels on their own index, which the bundler passes with --extra-index-url.
+# They are tagged py3-none-<platform> rather than cp312: the C++ lives in a
+# shared library loaded through ctypes, not in a CPython extension, so one
+# wheel works on any Python 3.
+#
+# The marker excludes macOS on Intel, which has never had a py3-none x86_64
+# wheel -- the newest usable build there is 0.3.2. That platform falls back to
+# the CTranslate2 engine, which ships anyway as a transitive dependency of
+# faster-whisper. Without the marker, pip would find no wheel there and try to
+# compile the sdist, and the build would fail on the build machine rather than
+# quietly on a user's.
+#
+# Brings jinja2, MarkupSafe and diskcache with it. constraints.txt does not pin
+# those yet -- regenerate it and the SBOM after this lands.
+llama-cpp-python==0.3.35; platform_system != "Darwin" or platform_machine == "arm64"
+
 # Calendar / email providers are not part of Core and need no packages here.
 # Nothing in this list can reach the network on your behalf.
 

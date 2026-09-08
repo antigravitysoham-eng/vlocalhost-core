@@ -192,6 +192,74 @@ def component(name, version, licence, description, scope="required",
     return node
 
 
+#: The model weights the product runs on. They were missing from this document
+#: for the same reason they are easy to forget: pip does not install them, so a
+#: dependency scanner never sees them. They are still third-party artifacts that
+#: arrive on a user's machine, and the first question a procurement reviewer
+#: asks about an AI product is which models it uses and under what terms.
+#:
+#: Listed with ``scope: optional`` because today they are fetched on first run
+#: rather than shipped. An installer that bundles them should promote the ones
+#: it carries to ``required`` -- at that point we are the redistributor, and
+#: the distinction between these licences stops being academic.
+MODELS = [
+    ("faster-whisper-base", "ebe41f70", "MIT",
+     "OpenAI Whisper base, converted to CTranslate2 by Systran and fetched "
+     "from huggingface.co/Systran/faster-whisper-base. Speech to text. "
+     "Revision pinned in config.WHISPER_REVISION.",
+     "pkg:huggingface/Systran/faster-whisper-base@ebe41f70"),
+    ("silero-vad", "v6", "MIT",
+     "Voice activity detection. Ships inside faster-whisper's own assets "
+     "rather than being fetched separately.",
+     "pkg:huggingface/snakers4/silero-vad@v6"),
+    ("llama3.2", "3B", "LLaMA-3.2-Community-Licence",
+     "Note-writing model for the Ollama engine, fetched by Ollama from "
+     "registry.ollama.ai, not by this application. NOT redistributable "
+     "without accepting Meta's attribution and acceptable-use conditions -- "
+     "see run_model_bench.py.",
+     "pkg:generic/llama3.2@3B"),
+    # The two below are different from every other entry here: this
+    # application downloads them itself, on the user's behalf, from a button in
+    # Settings and in the setup wizard. That is why both had to be a licence we
+    # are allowed to point at without asking anyone to accept terms first --
+    # checked against the Hugging Face API on 1 September 2026, both declare
+    # apache-2.0 and neither is gated.
+    #
+    # Which one a machine gets is decided by platform, not preference: see
+    # notes_model.default_spec(). llama.cpp is faster and needs no generation
+    # floor, but has no wheel for macOS on Intel, which gets the CTranslate2
+    # conversion instead.
+    #
+    # Watch the size when changing these. Qwen2.5-3B-Instruct is NOT Apache --
+    # it declares qwen-research -- so a "bigger is better" bump would move the
+    # product onto a research licence without anything failing.
+    ("Qwen2.5-1.5B-Instruct-GGUF", "91cad511", "Apache-2.0",
+     "Built-in note-writing model for the llama.cpp engine, downloaded by this "
+     "application from huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF. "
+     "Q4_K_M quantisation, 1065 MB. Revision pinned in notes_model.py. Used on "
+     "every platform except macOS on Intel.",
+     "pkg:huggingface/Qwen/Qwen2.5-1.5B-Instruct-GGUF@91cad511"),
+    ("Qwen2.5-1.5B-Instruct-ct2-int8", "55bb006d", "Apache-2.0",
+     "Built-in note-writing model for the CTranslate2 engine, downloaded by "
+     "this application from huggingface.co/jncraton/"
+     "Qwen2.5-1.5B-Instruct-ct2-int8. int8 conversion, 1485 MB across five "
+     "files. Revision pinned in notes_model.py. Used on macOS on Intel, where "
+     "llama-cpp-python has no wheel.",
+     "pkg:huggingface/jncraton/Qwen2.5-1.5B-Instruct-ct2-int8@55bb006d"),
+]
+
+
+def model_components():
+    """The weights, as SBOM components. See :data:`MODELS`."""
+    out = []
+    for name, ver, lic, desc, purl in MODELS:
+        node = component(name, ver, lic, desc, scope="optional", ctype="machine-learning-model")
+        node["bom-ref"] = purl
+        node["purl"] = purl
+        out.append(node)
+    return out
+
+
 def licence_node(value):
     """CycloneDX is strict about which of the three shapes a licence takes.
 
@@ -249,6 +317,8 @@ def build(target="", stage="", out=""):
 
     for name, ver, lic, desc in OPTIONAL:
         comps.append(component(name, ver, lic, desc, scope="optional"))
+
+    comps.extend(model_components())
 
     props = [{"name": "vlocalhost:target", "value": target},
              {"name": "vlocalhost:bundled-packages",

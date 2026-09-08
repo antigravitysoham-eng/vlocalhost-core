@@ -129,12 +129,21 @@ def _notes_engine_state() -> str:
         import summarizer
 
         ok, detail = summarizer.status()
-        # The engine's name, not the model's: every engine's detail already
-        # names its own model, and prefixing the label printed it twice.
-        name = getattr(summarizer.engine(), "name", "custom")
-        return f"{name}: {detail}"
     except Exception as e:  # noqa: BLE001
         return f"unknown ({type(e).__name__})"
+
+    # The engine's name, not the model's: every engine's detail already names
+    # its own model, and prefixing the label printed it twice.
+    #
+    # Naming it is a second call that can fail on its own, and it used to share
+    # the except above -- so a misconfigured engine reported "unknown
+    # (RuntimeError)" and threw away the sentence status() had just produced,
+    # which is the only part of the line a user can act on.
+    try:
+        name = getattr(summarizer.engine(), "name", "custom")
+    except Exception:  # noqa: BLE001
+        return detail
+    return f"{name}: {detail}"
 
 
 def _network_state() -> str:
@@ -417,8 +426,27 @@ def report_crash(exc_type, exc_value, exc_tb) -> None:
         print("-" * 60 + "\n", flush=True)
 
 
-def tk_exception(_widget, exc_type, exc_value, exc_tb) -> None:
-    """Hook for ``root.report_callback_exception``."""
+def tk_exception(exc_type, exc_value, exc_tb=None, *_rest) -> None:
+    """Hook for ``root.report_callback_exception``.
+
+    Three parameters, not four, and that was a real bug for the whole of 1.2.2.
+
+    Tkinter calls ``root.report_callback_exception(exc, val, tb)``. Assigning a
+    plain function to that attribute on the *instance* means Python passes no
+    ``self``, so the old signature ``(_widget, exc_type, exc_value, exc_tb)``
+    was one argument short and raised ``TypeError: tk_exception() missing 1
+    required positional argument`` -- from inside the error handler, while
+    handling an error.
+
+    The effect was exactly the opposite of the intent. ``gui.py`` installs this
+    because "Tk swallows exceptions raised inside callbacks and prints them to a
+    console the user does not have"; instead, every unhandled exception in a GUI
+    callback produced a confused double traceback and nothing reached the crash
+    report -- which is the one place a user would have sent it from.
+
+    ``*_rest`` so that a future Tk, or a caller that does bind it as a method,
+    cannot break this the same way again.
+    """
     report_crash(exc_type, exc_value, exc_tb)
 
 
