@@ -1076,6 +1076,46 @@ def repetition_is_still_collapsed():
     return "62 copies of one bullet reduced to 1"
 
 
+def the_shipped_speech_model_is_light():
+    """Every place that decides the speech model must agree, and agree on tiny.
+
+    1.2.3 shipped claiming Light was the default and gave people Balanced.
+    `config.WHISPER_MODEL` was changed to "tiny" and nothing else was, but
+    config is only consulted when settings.json is silent -- and the setup
+    wizard writes a profile on first run, so `base` was written over the top of
+    it for every new install. One of three places was changed and only that one
+    was checked.
+
+    The model matters beyond transcript quality: `base` keeps every core busy
+    for as long as a recording runs, which on some machines distorts the user's
+    own voice for the other people on a call in a browser.
+    """
+    import performance
+
+    assert performance.DEFAULT == "light", (
+        f"default profile is {performance.DEFAULT!r}")
+    assert performance.PROFILES["light"]["WHISPER_MODEL"] == "tiny", \
+        performance.PROFILES["light"]["WHISPER_MODEL"]
+    assert config.WHISPER_MODEL == "tiny", (
+        f"config.WHISPER_MODEL is {config.WHISPER_MODEL!r}")
+
+    # And the wizard must take its default from performance rather than
+    # repeating it. Only *fallbacks* count -- the wizard also names all three
+    # profiles to draw the radio buttons, which is correct and must not fail
+    # this check. An earlier version of this assertion rejected any mention of
+    # "balanced" at all and flagged that list.
+    src = open("setup_wizard.py", encoding="utf-8").read()
+    for bad in ('"profile", "balanced"', 'else "balanced"', "'profile', 'balanced'"):
+        assert bad not in src, f"setup_wizard.py hardcodes a fallback: {bad}"
+    assert src.count("performance.DEFAULT") >= 2, \
+        "the wizard does not read performance.DEFAULT for its fallbacks"
+    return f"config, profile and wizard all say {config.WHISPER_MODEL}"
+
+
+check("the shipped speech model is Light everywhere",
+      the_shipped_speech_model_is_light)
+
+
 def the_prompt_offers_nothing_to_copy():
     """No prompt may contain content a model could pass off as the meeting.
 

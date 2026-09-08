@@ -14,7 +14,7 @@ import config
 PROFILES = {
     "light": {
         "label": "Light",
-        "summary": "Old or low-power machines, 2 cores, ≤4 GB RAM",
+        "summary": "The default. Leaves the machine free while you are on a call",
         "WHISPER_MODEL": "tiny",
         "WHISPER_BEAM_SIZE": 1,
         "WHISPER_COMPUTE": "int8",
@@ -25,7 +25,7 @@ PROFILES = {
     },
     "balanced": {
         "label": "Balanced",
-        "summary": "The default. Keeps up with live speech on modest hardware",
+        "summary": "Better transcripts, when nothing else needs the machine",
         "WHISPER_MODEL": "base",
         "WHISPER_BEAM_SIZE": 1,
         "WHISPER_COMPUTE": "int8",
@@ -45,7 +45,20 @@ PROFILES = {
     },
 }
 
-DEFAULT = "balanced"
+#: The profile a fresh install gets.
+#:
+#: "light", not "balanced", and this is the setting that actually decides it --
+#: config.WHISPER_MODEL is only consulted when nothing has been written to
+#: settings.json, and the setup wizard writes a profile on first run. Changing
+#: the config default alone left every new install on `base`, which is how
+#: 1.2.3 shipped saying Light was the default while giving people Balanced.
+#:
+#: Why Light: `base` keeps every core busy for as long as a recording runs, and
+#: on some machines that is enough to distort the user's own voice for the
+#: other people on a call in a browser. Measured on a live call -- `base`
+#: distorted, `tiny` was clean, and reducing threads made it worse rather than
+#: better. See config.WHISPER_MODEL for the full table.
+DEFAULT = "light"
 
 # Settings a profile owns. Anything else the user set by hand is left alone.
 KEYS = ("WHISPER_MODEL", "WHISPER_BEAM_SIZE", "WHISPER_COMPUTE")

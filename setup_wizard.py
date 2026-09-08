@@ -441,7 +441,8 @@ class Wizard:
             "This trades accuracy against how hard your machine has to work. "
             "The model downloads once, the first time you record.")
 
-        self.profile = tk.StringVar(value=self.choices.get("profile", "balanced"))
+        self.profile = tk.StringVar(
+            value=self.choices.get("profile", performance.DEFAULT))
         for key in ("light", "balanced", "accurate"):
             spec = performance.PROFILES[key]
             row = tk.Frame(self.body, bg=INK)
@@ -886,7 +887,7 @@ class Wizard:
             out["Speech model"] = custom
         else:
             key = getattr(self, "profile", None)
-            key = key.get() if key else "balanced"
+            key = key.get() if key else performance.DEFAULT
             out["Speech model"] = performance.PROFILES[key]["WHISPER_MODEL"]
         import notes_model
 
