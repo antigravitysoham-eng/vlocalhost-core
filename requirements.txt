@@ -39,9 +39,27 @@ psutil==7.2.2
 # compile the sdist, and the build would fail on the build machine rather than
 # quietly on a user's.
 #
-# Brings jinja2, MarkupSafe and diskcache with it. constraints.txt does not pin
-# those yet -- regenerate it and the SBOM after this lands.
-llama-cpp-python==0.3.35; platform_system != "Darwin" or platform_machine == "arm64"
+# NOT SHIPPED IN 1.2.3, and the line is kept rather than deleted because the
+# reasoning above is still correct and this comes back the moment the built-in
+# note writer does.
+#
+# Two reasons to leave it out, and either would be enough on its own.
+#
+# It has no user. `SHOW_BUILTIN_NOTES_ENGINE` is False, so nothing in the app
+# can select the engine this exists for. Shipping 40 MB of runtime for a code
+# path no user can reach is not a trade, it is just weight.
+#
+# And it carries a vulnerability. `pip-audit --strict` fails the build on
+# diskcache 5.6.3, PYSEC-2026-2447, which arrives here transitively -- and the
+# advisory lists no fixed version, so there is nothing to pin forward to. A
+# known-vulnerable package is a poor thing to ship at the best of times; doing
+# it for a feature that is switched off is indefensible.
+#
+# Restoring it means putting this line back, re-pinning diskcache/jinja2/
+# markupsafe in constraints.txt, and checking whether PYSEC-2026-2447 has a fix
+# by then.
+#
+# llama-cpp-python==0.3.35; platform_system != "Darwin" or platform_machine == "arm64"
 
 # Calendar / email providers are not part of Core and need no packages here.
 # Nothing in this list can reach the network on your behalf.

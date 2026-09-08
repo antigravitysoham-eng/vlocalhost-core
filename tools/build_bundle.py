@@ -152,6 +152,9 @@ def interpreter(runtime):
 #: without this index the built-in note writer cannot be installed without a
 #: C++ toolchain. Recorded here rather than inside the pip call so that a
 #: reviewer asking "what else does this build trust" finds one answer.
+#: Prebuilt llama-cpp-python wheels. Unused while the built-in note writer is
+#: held back -- kept so restoring that feature is one line here and one in
+#: requirements.txt rather than a rediscovery.
 LLAMA_CPP_INDEX = "https://abetlen.github.io/llama-cpp-python/whl/cpu"
 
 
@@ -168,18 +171,17 @@ def install_dependencies(runtime):
     subprocess.run([python, "-m", "pip", "install", "--upgrade", "pip",
                     "--disable-pip-version-check", "-q"], check=True)
     install = [python, "-m", "pip", "install", "-r", requirements,
-               "--disable-pip-version-check", "-q",
-               # llama-cpp-python is the one dependency PyPI has no wheel for.
-               # The index below is the maintainer's own, and is deliberately
-               # an *extra* index rather than a replacement: everything else
-               # still resolves from PyPI, so this widens the supply chain by
-               # exactly one package instead of moving all of them.
-               "--extra-index-url", LLAMA_CPP_INDEX,
-               # Never compile. Without this, a platform with no matching wheel
-               # falls back to the sdist and the build either takes an hour or
-               # fails on a machine with no C++ toolchain -- and the failure
-               # would be a surprise at release time rather than a decision.
-               "--only-binary", "llama-cpp-python"]
+               "--disable-pip-version-check", "-q"]
+    # Everything resolves from PyPI. The extra index that used to be here
+    # existed for llama-cpp-python, which 1.2.3 does not ship -- see
+    # requirements.txt. It is worth noticing what removing it bought: that
+    # index served a corrupt wheel on the first v1.2.3 build and took the whole
+    # macOS release down with `BadZipFile: Bad CRC-32 for
+    # lib/libggml-base.0.20.0.dylib`, and the same package failed the audit on
+    # diskcache. One dependency, two ways to lose a release.
+    #
+    # Restore both this and LLAMA_CPP_INDEX when the built-in note writer
+    # ships; do not restore one without the other.
     if os.path.exists(constraints):
         install += ["-c", constraints]
     else:
