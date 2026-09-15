@@ -88,6 +88,12 @@
           <span>0 dB</span>
         </div>
 
+        <!-- Asked on first open, in the app rather than in setup: setup is
+             plumbing and blocks the window, and this is a question about the
+             person with a perfectly good empty answer. Shown once; answering
+             or dismissing both close it for good. -->
+        <div class="firstrun" id="firstrun" hidden></div>
+
         <!-- Checked once, when the window opens, and shown only when the answer
              is bad. Recording works without a notes engine and the transcript
              is always saved -- but the summary is not, and finding that out

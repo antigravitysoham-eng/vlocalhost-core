@@ -1466,52 +1466,6 @@ const SU_STEPS = [
     },
   },
   {
-    head: 'What kind of work do you do?',
-    sub: 'So the notes come out in a shape that suits you. Optional, and '
-       + 'changeable any time in Settings.',
-    draw() {
-      const box = el('div');
-
-      /* Two rows of chips and nothing to type. Setup is not the place to ask
-       * somebody to compose a paragraph about themselves -- the first version
-       * of this step did, and an empty textarea with a vanishing placeholder
-       * is a step people skip. Both answers here are one click. */
-      box.append(chipRow('Area of work', 'su-field', SU.opts.user_fields,
-                         () => SU.choice.user_field,
-                         v => { SU.choice.user_field = v; }));
-
-      box.append(chipRow('How should the notes read?', 'su-tone',
-                         SU.opts.user_tones,
-                         () => SU.choice.user_tone,
-                         v => { SU.choice.user_tone = v; }));
-
-      /* Folded away, because it is for the few people who want it and it must
-       * not be the thing the eye lands on. One line, not three. */
-      const more = el('div', 'su-more');
-      const toggle = el('button', 'disclose');
-      toggle.setAttribute('aria-expanded', SU.choice.user_context ? 'true' : 'false');
-      toggle.append(el('span', 'tri', '\u25B6'),
-                    document.createTextNode(' Anything else worth knowing'));
-      const wrap = el('div', 'su-more-in');
-      wrap.hidden = !SU.choice.user_context;
-      const inp = el('input', 'input wide');
-      inp.type = 'text';
-      inp.placeholder = 'e.g. mostly customer calls — skip the small talk';
-      inp.value = SU.choice.user_context || '';
-      inp.oninput = () => { SU.choice.user_context = inp.value; };
-      wrap.append(inp);
-      toggle.onclick = () => {
-        const open = toggle.getAttribute('aria-expanded') !== 'true';
-        toggle.setAttribute('aria-expanded', String(open));
-        wrap.hidden = !open;
-        if (open) inp.focus();
-      };
-      more.append(toggle, wrap);
-      box.append(more);
-      return box;
-    },
-  },
-  {
     head: 'What language are your meetings in?',
     sub: 'Pinning the language is faster and more accurate than detecting it: '
        + 'meeting speech comes in short bursts, which is exactly where detection '
@@ -1675,8 +1629,6 @@ const SU_STEPS = [
       const kinds = { builtin: 'Built in', ollama: 'Ollama', skip: 'Not now' };
       const rows = [
         ['Notes folder', SU.choice.notes_dir],
-        ['Area of work', SU.choice.user_field],
-        ['Notes read', SU.choice.user_tone],
         ['Language', lang && lang.label],
         ['Transcription', SU.choice.custom_model || (prof && prof.label)],
         ['Summaries', kinds[SU.choice.notes_kind]],
@@ -1725,6 +1677,7 @@ async function suStart() {
 
 function suFinish() {
   $('#setup').hidden = true;
+  askWhoFor();                       // the app is visible now; ask here
   /* The answers are live in the process now, so anything the window read
    * before setup ran has to be read again rather than kept. */
   if (LIVE) { live.loadSettings(); live.loadLibrary(); checkReady(); }
@@ -1783,4 +1736,73 @@ function suPull(p) {
 /* Setup runs before anything else is drawn: the rest of the window reads
  * settings that setup is about to write, so loading first would show answers
  * that are one step out of date. */
-window.addEventListener('pywebviewready', () => { suStart(); });
+window.addEventListener('pywebviewready', async () => {
+  /* Setup first when it is needed: the card belongs on a visible app, not
+   * underneath a modal. When setup is not needed this asks straight away. */
+  const shown = await suStart();
+  if (!shown) askWhoFor();
+});
+
+
+/* ============================================ who the notes are for ====== *
+ *
+ * Asked in the app on first open, not in setup. Setup is plumbing — where to
+ * save, what language, which model — and it blocks the window until it is
+ * answered. This is not plumbing: it is a question about the person, it has a
+ * perfectly good empty answer, and asking it behind a modal before they have
+ * seen the app made it feel like part of the installer.
+ *
+ * So the app opens, and the first screen carries the question. Answer it,
+ * wave it away, or ignore it entirely and start recording — all three work,
+ * and none of them asks again.
+ */
+const FR = { field: '', tone: '' };
+
+function firstRunCard(opts) {
+  const host = $('#firstrun');
+  if (!host) return;
+  host.replaceChildren();
+
+  const head = el('div', 'fr-head');
+  head.append(el('strong', null, 'Who are these notes for?'));
+  head.append(el('span', null,
+    'Two clicks and the notes come out in a shape that suits you. '
+    + 'Optional — Settings has it either way.'));
+  host.append(head);
+
+  host.append(chipRow('Area of work', 'fr-field', opts.user_fields,
+                      () => FR.field, v => { FR.field = v; }));
+  host.append(chipRow('How should the notes read?', 'fr-tone', opts.user_tones,
+                      () => FR.tone, v => { FR.tone = v; }));
+
+  const act = el('div', 'fr-act');
+  const save = el('button', 'btn primary', 'Save');
+  const skip = el('button', 'btn', 'Not now');
+  /* Both answers close it for good. "Not now" is a decision, and re-asking
+     somebody who already said no is how a banner becomes nagging. */
+  const done = async (changes) => {
+    save.disabled = skip.disabled = true;
+    try { await api().settings_set(Object.assign({USER_ASKED: true}, changes)); }
+    catch (e) { /* never trap them behind it */ }
+    host.hidden = true;
+    if (LIVE) live.loadSettings();
+  };
+  save.onclick = () => done({USER_FIELD: FR.field, USER_TONE: FR.tone});
+  skip.onclick = () => done({});
+  act.append(save, skip);
+  host.append(act);
+
+  host.hidden = false;
+}
+
+async function askWhoFor() {
+  if (!api()) return;
+  try {
+    const o = await api().setup_options();
+    if (!o || o.error) return;
+    /* Already answered, already waved away, or already set in Settings. */
+    if (o.user_asked || o.user_field || o.user_tone) return;
+    FR.field = ''; FR.tone = '';
+    firstRunCard(o);
+  } catch (e) { /* a missing card is better than a broken screen */ }
+}

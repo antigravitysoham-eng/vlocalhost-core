@@ -702,3 +702,30 @@ body {
 }
 .su-more .disclose:hover { color: var(--ink-2); }
 .su-more-in { margin-top: var(--s3); }
+
+/* --------------------------------------------- who the notes are for ---- *
+ * Asked on the Recording screen the first time the app opens, not in setup.
+ * A card that sits in the page rather than over it: the app is usable while
+ * it is there, and starting a recording without answering is fine.
+ *
+ * Quiet by default. It is an offer, not a warning -- amber is spent on the
+ * chips a person picks, not on the container asking.                        */
+.firstrun {
+  margin: var(--s4) 0 0;
+  padding: var(--s4) var(--s5);
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+.firstrun[hidden] { display: none; }
+.fr-head { margin-bottom: var(--s4); }
+.fr-head strong { display: block; font: var(--t-title); color: var(--ink); }
+.fr-head span {
+  display: block; font: var(--t-body); color: var(--ink-3);
+  margin-top: 2px; max-width: 64ch;
+}
+.fr-act {
+  display: flex; gap: var(--s3); align-items: center;
+  margin-top: var(--s4); padding-top: var(--s3);
+  border-top: 1px solid var(--line);
+}

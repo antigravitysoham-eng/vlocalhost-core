@@ -1060,6 +1060,7 @@ def options() -> dict:
         "builtin": {"size_mb": spec.size_mb, "engine": spec.engine},
         "ollama_url": getattr(config, "OLLAMA_URL", ""),
         "ollama_model": getattr(config, "OLLAMA_MODEL", DEFAULT_LLM),
+        "user_asked": bool(getattr(config, "USER_ASKED", False)),
         "user_fields": list(USER_FIELDS),
         "user_tones": list(USER_TONES),
         "user_field": getattr(config, "USER_FIELD", "") or "",

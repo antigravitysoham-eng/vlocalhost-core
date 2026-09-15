@@ -266,6 +266,12 @@ CUSTOM_TRANSCRIBER = None
 #: they type.
 USER_FIELD = ""
 
+#: True once the app has asked who the notes are for -- answered or waved
+#: away. Its own flag rather than "are the fields empty", because leaving them
+#: empty is a real answer and somebody who chose that must not be asked again
+#: on every launch.
+USER_ASKED = False
+
 #: How they want the notes to read: "Short and blunt", "Full detail",
 #: "Decisions and owners only", "Formal", "Casual" -- or anything they type.
 #: A separate key from USER_CONTEXT rather than a sentence folded into it, so
