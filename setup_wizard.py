@@ -492,7 +492,8 @@ class Wizard:
         self.status = tk.StringVar(value="")
         self.progress_text = tk.StringVar(value="")
         self.notes_kind = tk.StringVar(
-            value=self.choices.get("notes_kind", "builtin"))
+            value=self.choices.get(
+                "notes_kind", "builtin" if builtin_usable() else "ollama"))
         # True once the person has actually picked. Until then the first probe
         # is allowed to move the default to whatever this machine already has,
         # because pushing a gigabyte at somebody who already runs Ollama is a
@@ -504,9 +505,17 @@ class Wizard:
         card.pack(fill="x", pady=(18, 0))
 
         spec = notes_model.DEFAULT
-        options = (
-            ("builtin", "Built in",
-             "one download, about %d MB, nothing else to install" % spec.size_mb),
+        # "Built in" only when this build can actually run it. See
+        # :func:`builtin_usable` -- in every shipped build since 1.2.3 it
+        # cannot, and offering it wrote an engine that could not load.
+        options = ()
+        if builtin_usable():
+            options += (
+                ("builtin", "Built in",
+                 "one download, about %d MB, nothing else to install"
+                 % spec.size_mb),
+            )
+        options += (
             ("ollama", "Use Ollama",
              "if you already have it, or want to pick your own models"),
             ("skip", "Not now",
@@ -964,6 +973,30 @@ class Wizard:
 # where Tk is missing -- which is the same build Aurora exists for.
 
 
+def builtin_usable() -> bool:
+    """Can this build actually run the built-in note writer?
+
+    ``notes_model.present()`` answers a different question -- whether the
+    *weights* resolve -- and says True in a build that cannot load them.
+    llama-cpp-python was dropped from requirements.txt in 1.2.3 (it failed
+    ``pip-audit --strict`` and broke the macOS build), so the engine those
+    weights need is not installed, and ``gui.py`` has hidden the option in
+    Settings ever since via ``SHOW_BUILTIN_NOTES_ENGINE``.
+
+    Setup never got that memo. It offered "Built in" as the *default* choice,
+    wrote ``SUMMARY_ENGINE = "llamacpp"``, and the first recording then saved a
+    transcript and no notes -- the worst failure this app has, arrived at by
+    following the wizard's own default on a fresh install.
+
+    So the question is asked of the import, not of the disk.
+    """
+    try:
+        import llama_cpp  # noqa: F401
+    except Exception:                                  # noqa: BLE001
+        return False
+    return True
+
+
 def options() -> dict:
     """Everything a front end needs to draw the five steps.
 
@@ -974,6 +1007,10 @@ def options() -> dict:
 
     spec = notes_model.DEFAULT
     return {
+        # False in every shipped build today. A front end must not offer the
+        # built-in writer when this is False -- see :func:`builtin_usable`.
+        "builtin_usable": builtin_usable(),
+        "notes_kind_default": "builtin" if builtin_usable() else "ollama",
         "notes_dir": default_notes_dir(),
         "languages": [{"code": code, "label": label}
                       for code, label in languages.choices()],

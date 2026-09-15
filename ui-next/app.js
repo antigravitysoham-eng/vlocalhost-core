@@ -1366,7 +1366,9 @@ const SU = {
   opts: null,
   choice: {
     notes_dir: '', language: '', profile: '', custom_model: '',
-    notes_kind: 'builtin', ollama_url: '', ollama_model: '',
+    /* Overwritten from `options().notes_kind_default` in suStart(); Core
+     * decides, because Core is the side that knows what this build can run. */
+    notes_kind: 'ollama', ollama_url: '', ollama_model: '',
   },
 };
 
@@ -1485,11 +1487,21 @@ const SU_STEPS = [
     draw() {
       const box = el('div');
       const mb = SU.opts.builtin.size_mb;
-      const picks = [
-        ['builtin', 'Built in', 'one download, about ' + mb + ' MB, nothing else to install'],
+      /* "Built in" is only offered when this build can actually run it.
+       * llama-cpp-python was dropped in 1.2.3, so in every shipped build the
+       * engine those weights need is absent -- and offering it anyway wrote
+       * SUMMARY_ENGINE = "llamacpp" and produced a transcript with no notes,
+       * by following the wizard's own default. Core answers this by trying
+       * the import, not by looking for the weights on disk. */
+      const picks = [];
+      if (SU.opts.builtin_usable) {
+        picks.push(['builtin', 'Built in',
+                    'one download, about ' + mb + ' MB, nothing else to install']);
+      }
+      picks.push(
         ['ollama', 'Use Ollama', 'if you already have it, or want to pick your own models'],
         ['skip', 'Not now', 'you still get a full transcript of every meeting'],
-      ];
+      );
       const detail = el('div');
 
       function drawDetail(kind) {
@@ -1608,6 +1620,7 @@ async function suStart() {
   SU.choice.notes_dir = opts.notes_dir;
   SU.choice.language = opts.language_default;
   SU.choice.profile = opts.profile_default;
+  SU.choice.notes_kind = opts.notes_kind_default || 'ollama';
   SU.choice.ollama_url = opts.ollama_url;
   SU.choice.ollama_model = opts.ollama_model;
   $('#setup').hidden = false;
