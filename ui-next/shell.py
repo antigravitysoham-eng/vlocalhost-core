@@ -79,25 +79,48 @@ def _menu(api):
 
 
 def _run(api, script):
-    """Fire a page command from a menu click, without letting it raise."""
+    """Fire a page command from a menu click, without letting it raise.
+
+    Off the calling thread on purpose, for the same reason :func:`_closing`
+    touches nothing: a menu action is delivered on the GUI thread, and
+    ``evaluate_js`` waits there for a webview that needs that very thread to
+    answer. One deadlock of this shape already shipped -- every window close
+    hung -- and a menu item is not worth risking a second.
+    """
     window = api._window
     if window is None:
         return
-    try:
-        window.evaluate_js(script)
-    except Exception:
-        pass
+
+    def fire():
+        try:
+            window.evaluate_js(script)
+        except Exception:                              # noqa: BLE001
+            pass
+
+    threading.Thread(target=fire, daemon=True, name="vl-menu").start()
+
+
+#: The shutdown worker, so :func:`main` can wait for it after the GUI is gone.
+_shutdown = None
 
 
 def _closing(api):
-    """Window close: finish any summary still being written.
+    """Window close: let the window go, and finish the writing behind it.
 
-    A summary in flight is a meeting somebody already sat through. Returning
-    True here would drop it. The wait is announced in the page first, so the
-    window explains itself rather than appearing to hang.
+    **Nothing here may call into the page.** This runs on the GUI thread, and
+    ``evaluate_js`` blocks that thread until the webview has run the script --
+    which the webview cannot do, because running it needs the same thread. The
+    result is a deadlock, and Windows paints a deadlocked window as "Not
+    Responding": every close appeared to hang the app.
+
+    It was also pointless. Returning True closes the window, so a message
+    pushed to the page here is drawn on a page that is going away. The wait
+    that matters is the one below, and it happens after the GUI has gone.
     """
-    api.push("closing", {"pending": api.status().get("pending", 0)})
-    threading.Thread(target=api.shutdown, daemon=True, name="vl-shutdown").start()
+    global _shutdown
+    _shutdown = threading.Thread(target=api.shutdown, daemon=True,
+                                 name="vl-shutdown")
+    _shutdown.start()
     return True
 
 
@@ -169,6 +192,17 @@ def main(argv=None):
     # open a port to draw itself.
     webview.start(begin if start_now else None,
                   menu=_menu(api), debug=debug, private_mode=True)
+
+    # The window is gone; the summary being written when it closed is not. That
+    # thread is a daemon, so without this the interpreter would exit out from
+    # under it and a meeting somebody sat through would lose its notes. Bounded
+    # rather than open-ended: a stuck model must not leave a process nobody can
+    # see holding the microphone lock.
+    if _shutdown is not None:
+        _shutdown.join(timeout=120)
+        if _shutdown.is_alive():
+            print("[shell] still writing notes after 120s; exiting anyway",
+                  flush=True)
     return 0
 
 
