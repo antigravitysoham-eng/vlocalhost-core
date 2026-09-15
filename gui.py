@@ -21,11 +21,16 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import config
 import engine as engine_mod
+import notes_panel
 import updates
 import languages
 import performance
 import settings
 from integrations import UPGRADE_URL, available_providers, provider_label, store
+# The brand tokens and fonts. They live in `theme` rather than here so the
+# notes panel can paint with them without importing the window that builds it.
+from theme import (AMBER, AMBER_DEEP, BODY, CARD, CYAN, DANGER, EDGE, INK,
+                   MONO, MUTED, PANEL, PAPER, TITLE)
 
 #: Whether Settings offers the built-in note writer.
 #:
@@ -39,17 +44,6 @@ from integrations import UPGRADE_URL, available_providers, provider_label, store
 #: One flag rather than deleting the rows, so turning the feature on is a
 #: one-line change and a rebuild rather than an archaeology exercise.
 SHOW_BUILTIN_NOTES_ENGINE = False
-
-# --- Brand tokens ---------------------------------------------------------
-INK = "#090C12"       # window ground
-PANEL = "#0E1220"     # cards / surfaces
-EDGE = "#1C2333"      # hairline borders
-AMBER = "#FFB43D"     # the one accent
-AMBER_DEEP = "#E08A17"
-CYAN = "#38E1CE"      # "on-device / live" — semantic only
-PAPER = "#EAEEF4"
-MUTED = "#7E8AA0"
-DANGER = "#E8624F"
 
 #: Returned by the update worker when the install is sealed, so the result
 #: handler can tell "you switched this off" apart from "we could not reach it".
@@ -102,12 +96,6 @@ def extra_tabs():
     return list(_extra_tabs)
 
 
-MONO = ("Cascadia Code", 9) if platform.system() == "Windows" else ("Menlo", 11)
-BODY = ("Segoe UI", 10) if platform.system() == "Windows" else ("Helvetica", 12)
-TITLE = ("Segoe UI", 20, "bold") if platform.system() == "Windows" \
-    else ("Helvetica", 22, "bold")
-
-
 def open_folder(path):
     """Reveal a folder in the OS file manager."""
     os.makedirs(path, exist_ok=True)
@@ -132,10 +120,17 @@ class App:
 
         self.engine = engine_mod.build(on_line=self._line_from_worker,
                                        on_partial=self._interim_from_worker)
+        # Notes are written after the stop returns, so they arrive here rather
+        # than as the return value of anything. See _notes_update.
+        self.engine.on_notes(self._notes_update)
 
         root.title("Vlocalhost.AI — Meeting Notes")
-        root.geometry("940x660")
-        root.minsize(820, 560)
+        # Wider than it was. The Record tab now holds two panes side by side --
+        # the transcript and the notes column -- and at the old 940 the notes
+        # were squeezed to about 340px, which wraps an action item's owner onto
+        # its own line. The sash is draggable either way.
+        root.geometry("1180x720")
+        root.minsize(900, 600)
         root.configure(bg=INK)
         root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -552,13 +547,40 @@ class App:
         ttk.Button(controls, text="Report a problem",
                    command=self._report_problem).pack(side="left")
 
-        ttk.Label(parent, text="LIVE TRANSCRIPT", style="Mono.TLabel").pack(
-            anchor="w", pady=(6, 4))
-        wrap = tk.Frame(parent, bg=EDGE, padx=1, pady=1)
+        # The two headings, outside the panes rather than inside them. They are
+        # the collapse controls, so they have to stay reachable when the pane
+        # they name is not on screen -- a control that disappears with the
+        # thing it hides cannot bring it back.
+        bar = ttk.Frame(parent)
+        bar.pack(fill="x", pady=(6, 4))
+        self._panes = {}
+        self.transcript_toggle = self._pane_toggle(bar, "transcript",
+                                                   "LIVE TRANSCRIPT")
+        self.notes_toggle = self._pane_toggle(bar, "notes",
+                                              "SUMMARY & NEXT STEPS")
+
+        # Two panes: the words on the left, what they came to on the right.
+        # They are side by side rather than one after the other because they
+        # are now live at the same time -- the notes column is summarising the
+        # last meeting while the transcript fills with the next one.
+        self.split = ttk.PanedWindow(parent, orient="horizontal")
+        self.split.pack(fill="both", expand=True)
+
+        left = ttk.Frame(self.split)
+        right = ttk.Frame(self.split)
+        self.split.add(left, weight=3)
+        self.split.add(right, weight=2)
+        # index is where each goes back when it is expanded again; a pane
+        # forgotten and re-added lands wherever it is inserted, and the
+        # transcript belongs on the left whichever order they were hidden in.
+        self._panes["transcript"] = {"frame": left, "index": 0, "open": True}
+        self._panes["notes"] = {"frame": right, "index": 1, "open": True}
+
+        wrap = tk.Frame(left, bg=EDGE, padx=1, pady=1)
         wrap.pack(fill="both", expand=True)
         self.transcript = tk.Text(wrap, bg=INK, fg=PAPER, insertbackground=AMBER,
                                   font=MONO, wrap="word", relief="flat",
-                                  padx=14, pady=12, height=12)
+                                  padx=14, pady=12, height=12, width=40)
         self.transcript.pack(side="left", fill="both", expand=True)
         scroll = ttk.Scrollbar(wrap, command=self.transcript.yview)
         scroll.pack(side="right", fill="y")
@@ -571,17 +593,61 @@ class App:
                                       font=(MONO[0], MONO[1], "italic"))
         self._say("Silence is ignored — lines appear when someone speaks.", "hint")
 
-        # What to do with the meeting once it is saved. Empty on a Core
-        # install: the row builds itself from whatever registered, and nothing
-        # here knows what any of it is.
-        self.next_row = ttk.Frame(parent)
-        self.next_row.pack(anchor="w", pady=(10, 0), fill="x")
-        self.next_label = ttk.Label(self.next_row, text="", style="Muted.TLabel",
-                                    wraplength=820, justify="left")
+        # One card per meeting stopped this session: its own progress line, its
+        # own notes, its own next-step buttons. See :mod:`notes_panel`.
+        self.notes_column = notes_panel.NotesColumn(
+            self._scrollable(right),
+            submit=lambda fn: threading.Thread(target=fn, daemon=True).start(),
+            to_ui=self._ui_q.put,
+            open_path=self._open_saved,
+            set_clipboard=self._set_clipboard)
 
-        self.result_label = ttk.Label(parent, text="", style="Muted.TLabel",
-                                      wraplength=820, justify="left")
-        self.result_label.pack(anchor="w", pady=(10, 0))
+    # -- collapsing a pane ---------------------------------------------------
+    def _pane_toggle(self, parent, key, label):
+        """The heading for one pane, which is also its collapse control."""
+        button = tk.Button(
+            parent, text=f"▾ {label}", command=lambda: self._toggle_pane(key),
+            bg=PANEL, fg=MUTED, activebackground=PANEL, activeforeground=PAPER,
+            relief="flat", bd=0, cursor="hand2", font=MONO,
+            highlightthickness=0, padx=0, pady=2, anchor="w")
+        button.pack(side="left", padx=(0, 22))
+        return button
+
+    def _toggle_pane(self, key):
+        """Hide or restore one side of the split.
+
+        Collapsing the transcript gives the whole window to the notes, which is
+        what you want while reading them; collapsing the notes gives it all to
+        the words, which is what you want while a meeting is running. Neither
+        is a mode -- both panes keep working either way, and a hidden pane is
+        only hidden.
+        """
+        pane = self._panes[key]
+        other = self._panes["notes" if key == "transcript" else "transcript"]
+        if pane["open"] and not other["open"]:
+            # Refuse rather than leave an empty tab. Open the other one first
+            # and the second collapse does what was asked.
+            self._toggle_pane("notes" if key == "transcript" else "transcript")
+
+        if pane["open"]:
+            self.split.forget(pane["frame"])
+            pane["open"] = False
+        else:
+            # insert() by position, so the transcript returns to the left even
+            # if it was the one hidden first.
+            where = 0 if pane["index"] == 0 or not other["open"] else "end"
+            self.split.insert(where, pane["frame"],
+                              weight=3 if key == "transcript" else 2)
+            pane["open"] = True
+        self._paint_toggles()
+
+    def _paint_toggles(self):
+        for key, button in (("transcript", self.transcript_toggle),
+                            ("notes", self.notes_toggle)):
+            open_ = self._panes[key]["open"]
+            label = button.cget("text")[2:]
+            button.configure(text=("▾ " if open_ else "▸ ") + label,
+                             fg=MUTED if open_ else AMBER)
 
     def _say(self, text, tag=None):
         self.transcript.configure(state="normal")
@@ -631,8 +697,7 @@ class App:
         self._busy = True
         self.record_btn.configure(state="disabled")
         if self.engine.is_listening:
-            self._saving_since = time.monotonic()
-            self._tick_saving()
+            self._set_state("Saving…", "Writing the transcript.")
             threading.Thread(target=self._stop_worker, daemon=True).start()
         else:
             self._set_state("Starting…", "Opening the microphone.")
@@ -648,9 +713,6 @@ class App:
 
     def _started(self):
         self._busy = False
-        # Ticker state for the "Saving..." elapsed counter.
-        self._saving_since = None
-        self._saving_job = None
         title = self.engine.event.title if self.engine.event else None
         self.transcript.configure(state="normal")
         self.transcript.delete("1.0", "end")
@@ -663,7 +725,6 @@ class App:
         self.record_btn.configure(text="■ Stop & save", style="Stop.TButton",
                                   state="normal")
         self._set_state("● Recording", title or "Manual session — no calendar event.")
-        self.result_label.configure(text="")
 
     def _start_failed(self, err):
         self._busy = False
@@ -692,43 +753,16 @@ class App:
             pass                                   # failure must not add one
         messagebox.showerror("Could not start recording", str(err))
 
-    def _tick_saving(self):
-        """Count up while the model works, so a long wait does not read as a hang.
-
-        Summarizing a real meeting on a local model is genuinely slow -- around
-        two minutes for a 7,000-character transcript on llama3.2 -- and the
-        window used to show one unchanging "Saving..." for all of it. Nothing
-        was wrong, but there was no way to tell that from the outside. A moving
-        number is the difference between "working" and "frozen".
-        """
-        if self._saving_since is None:
-            return
-        secs = int(time.monotonic() - self._saving_since)
-        if secs < 20:
-            hint = "Summarizing with the local model."
-        elif secs < 75:
-            hint = "Summarizing with the local model. This takes a minute or two."
-        else:
-            hint = ("Still summarizing. Long meetings take longer; a smaller "
-                    "Ollama model finishes sooner.")
-        self._set_state("Saving\u2026 %d:%02d" % (secs // 60, secs % 60), hint)
-        self._saving_job = self.root.after(1000, self._tick_saving)
-
-    def _stop_saving_ticker(self):
-        if self._saving_job is not None:
-            try:
-                self.root.after_cancel(self._saving_job)
-            except Exception:  # noqa: BLE001 - already fired or window gone
-                pass
-        self._saving_job = None
-        self._saving_since = None
-
     def _stop_worker(self):
-        result = self.engine.stop_and_save()
+        # defer_notes: come back as soon as the words are on disk. Summarising
+        # is one to two minutes of local model, and it used to happen inside
+        # this call -- which is why the record button stayed dead for all of
+        # it. Now it happens on the engine's notes worker and reports into the
+        # card that _stopped opens, and the next meeting can start immediately.
+        result = self.engine.stop_and_save(defer_notes=True)
         self._ui_q.put(lambda: self._stopped(result))
 
     def _stopped(self, result):
-        self._stop_saving_ticker()
         self._busy = False
         # Anything still showing as provisional was superseded by the flush
         # that Stop performed; leaving it would put unfinished words at the
@@ -736,95 +770,70 @@ class App:
         self._clear_interim()
         self.record_btn.configure(text="● Start recording", style="Accent.TButton",
                                   state="normal")
-        self._set_state("Ready to record", "Saved. Press record to start another.")
         self.timer_label.configure(text="00:00")
 
         if not result.get("transcript"):
-            self.result_label.configure(text=result.get("error") or "Nothing saved.",
-                                        style="Bad.TLabel")
-            return
-        parts = [f"Saved “{result['title']}” → {os.path.basename(result['transcript'])}"]
-        if result.get("summary"):
-            parts.append(os.path.basename(result["summary"]))
-        if result.get("delivered"):
-            parts.append(result["delivered"])
-        if result.get("error"):
-            parts.append(f"summary failed: {result['error']}")
-        self.result_label.configure(text="  ·  ".join(parts), style="Muted.TLabel")
-        self._say("— saved —", "hint")
-        self._offer_next(result)
-
-    # -- what to do with the meeting next ------------------------------------
-    def _offer_next(self, result):
-        """Show a button per registered action. Nothing registered, nothing shown."""
-        for child in self.next_row.winfo_children():
-            child.pack_forget()
-
-        try:
-            import actions as actions_mod
-
-            meeting = actions_mod.Meeting(
-                title=result.get("title") or "",
-                transcript=self.engine.transcript(),
-                notes=result.get("notes"),
-                transcript_path=result.get("transcript") or "",
-                notes_path=result.get("summary") or "")
-            available = actions_mod.available_actions(meeting)
-        except Exception as e:  # noqa: BLE001 - an extension must never break saving
-            print(f"[actions] unavailable: {e}", flush=True)
-            return
-        if not available:
+            self._set_state("Ready to record",
+                            result.get("error") or "Nothing saved.")
             return
 
-        self._next_meeting = meeting
-        ttk.Label(self.next_row, text="Next:", style="Muted.TLabel").pack(
-            side="left", padx=(0, 8))
-        for action in available:
-            ttk.Button(self.next_row, text=action.label,
-                       command=lambda a=action: self._run_next(a)).pack(
-                side="left", padx=(0, 6))
-        self.next_label.pack(side="left", padx=(10, 0))
-        self.next_label.configure(text="")
+        self._set_state("Ready to record",
+                        "Saved. Summarizing on the right — you can start the "
+                        "next meeting now.")
+        self._say("— saved, summarizing in the background —", "hint")
+        # The card itself is opened by _notes_on_ui, on the engine's "queued"
+        # announcement, so that a meeting the calendar stopped on its own gets
+        # one too rather than only the ones stopped by this button.
 
-    def _run_next(self, action):
-        """Run one action off the Tk thread and put the result on the clipboard.
+    # -- notes arriving from the background worker ---------------------------
+    def _notes_update(self, job, state, result):
+        """Called by the engine's notes worker, mostly not on the Tk thread."""
+        self._ui_q.put(lambda: self._notes_on_ui(job, state, result))
 
-        Extraction takes seconds, not milliseconds -- it is a local model call --
-        so doing this inline would freeze the window mid-click and look like a
-        crash. The button says what is happening instead.
-        """
-        self.next_label.configure(text=f"{action.label}…", style="Muted.TLabel")
+    def _notes_on_ui(self, job, state, result):
+        if state == "queued":
+            self.notes_column.add(job, title=(result or {}).get("title") or "",
+                                  transcript_path=(result or {}).get("transcript") or "",
+                                  duration=(result or {}).get("recorded") or 0)
+            self.notes_column.renumber()
+            return
+        card = self.notes_column.card(job)
+        if card is None:
+            return
+        if state == "running":
+            card.set_running()
+        elif state == "done":
+            card.set_done(result, actions_for=self._available_actions)
+        elif state == "failed":
+            card.set_failed(result.get("error") or "The summary step failed.",
+                            transcript_path=result.get("transcript"))
+        self.notes_column.renumber()
+        self._refresh_status_right()
 
-        def work():
+    @staticmethod
+    def _available_actions(meeting):
+        import actions as actions_mod
+
+        return actions_mod.available_actions(meeting)
+
+    def _open_saved(self, path):
+        """Open one saved file, or its folder if the file has gone."""
+        if path and os.path.exists(path):
             try:
-                output = action.run(self._next_meeting)
-            except Exception as e:  # noqa: BLE001
-                self._ui_q.put(lambda err=e: self.next_label.configure(
-                    text=f"{action.label} failed: {err}", style="Bad.TLabel"))
+                if platform.system() == "Windows":
+                    os.startfile(path)  # noqa: S606 - a file this app wrote
+                elif platform.system() == "Darwin":
+                    subprocess.Popen(["open", path])
+                else:
+                    subprocess.Popen(["xdg-open", path])
                 return
-            self._ui_q.put(lambda text=output: self._next_ready(action, text))
+            except OSError as e:
+                print(f"[gui] open {path}: {e}", flush=True)
+        open_folder(engine_mod.notes_dir())
 
-        threading.Thread(target=work, daemon=True).start()
-
-    def _next_ready(self, action, output):
-        """Copy the result, and say what just went onto the clipboard.
-
-        The count is deliberate. Pasting into an assistant that is not on this
-        machine is an upload, and the honest thing is to say what is in it
-        before the user pastes rather than in a settings page they will not
-        read.
-        """
-        if not isinstance(output, str) or not output.strip():
-            self.next_label.configure(text="Nothing to copy — the meeting had "
-                                           "no decisions or actions in it.",
-                                      style="Muted.TLabel")
-            return
+    def _set_clipboard(self, text):
         self.root.clipboard_clear()
-        self.root.clipboard_append(output)
-        words = len(output.split())
-        self.next_label.configure(
-            text=f"Copied — {words} words, ready to paste. Nothing was sent.",
-            style="Good.TLabel")
+        self.root.clipboard_append(text)
 
     def _set_state(self, state, detail=None):
         self.state_label.configure(text=state)
@@ -2119,6 +2128,19 @@ class App:
                 "Still recording",
                 "A recording is in progress. Stop, save the notes, and quit?"):
             return
+        # Summaries still being written. The transcripts are already on disk,
+        # so nothing said is at risk -- but a summary somebody waited two
+        # minutes for and then lost by closing the window is its own kind of
+        # broken promise, so ask rather than decide for them.
+        waiting = self.engine.pending_notes()
+        if waiting and not messagebox.askyesno(
+                "Still summarizing",
+                f"{waiting} meeting{'s are' if waiting > 1 else ' is'} still "
+                f"being summarized.\n\nWait for "
+                f"{'them' if waiting > 1 else 'it'} to finish and quit?\n\n"
+                f"The transcript{'s are' if waiting > 1 else ' is'} already "
+                f"saved either way."):
+            return
         self.status_left.configure(text="Saving and closing…")
         self.root.update_idletasks()
         # Before the engine, so a hotkey pressed during a slow save cannot
@@ -2131,8 +2153,13 @@ class App:
                     handle.stop()
                 except Exception as e:  # noqa: BLE001
                     print(f"[gui] {name}: {e}", flush=True)
+        def waiting_for(n):
+            self.status_left.configure(
+                text=f"Finishing {n} summar{'ies' if n > 1 else 'y'}…")
+            self.root.update_idletasks()
+
         try:
-            self.engine.shutdown()
+            self.engine.shutdown(on_wait=waiting_for)
         except Exception as e:  # noqa: BLE001 - never block the quit
             print(f"[gui] shutdown: {e}", flush=True)
         for hook in _exit_hooks:
@@ -2172,8 +2199,12 @@ def run(record_on_start: bool = False):
         root.after(120, app._start_if_idle)
     # Auto-record from the calendar if the user turned it on.
     if config.AUTO_START_FROM_CALENDAR:
+        # defer_notes, like the button: a meeting the calendar ends by itself
+        # gets a card that summarises in the background, rather than locking
+        # the app up for two minutes at the exact moment the next call starts.
         app.engine.start_scheduler(
-            on_message=lambda m: app._ui_q.put(lambda: app._log_auth(f"[calendar] {m}")))
+            on_message=lambda m: app._ui_q.put(lambda: app._log_auth(f"[calendar] {m}")),
+            defer_notes=True)
     root.mainloop()
 
 

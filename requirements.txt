@@ -22,6 +22,29 @@ Pillow==12.3.0
 # Only for "Benchmark this machine" in Settings; everything else works without it.
 psutil==7.2.2
 
+# The window. `ui-next/` is HTML because Aurora is HTML, and this puts it in a
+# native frame -- WebView2 on Windows, WKWebView on macOS, WebKitGTK on Linux.
+# All three are the OS's own engine, so nothing here ships a browser.
+#
+# It drags in `bottle`, and that deserves a sentence rather than a shrug:
+# bottle is an HTTP server, and this app's pill reads "0 bytes out".
+#
+# **It was being started, and this note used to say it was not.** Measured on
+# 15 Sep 2026: handed a plain filesystem path, pywebview serves the page over
+# bottle and the window loads http://127.0.0.1:<random>/index.html. Nothing
+# left the machine -- it is loopback -- but a listening socket was open for the
+# life of every session while the code claimed otherwise.
+#
+# `ui-next/shell.py` now passes an explicit `file://` URL, which loads the same
+# page and starts nothing. Not passing `http_server` is not enough on its own;
+# the URL is what decides it. Check the window's `location.href` if this is
+# ever in doubt -- it says which of the two is happening.
+#
+# `pythonnet` is the Windows half -- it is how pywebview reaches WebView2 -- and
+# carries `clr-loader`. macOS pulls pyobjc instead. Both sets are in
+# constraints.txt behind environment markers.
+pywebview==6.2.1
+
 # The built-in note writer. Runs a GGUF inside this process, so a summary needs
 # no second program installed -- which is the whole reason it is here.
 #

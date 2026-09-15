@@ -14,6 +14,7 @@ about what is happening — and only one of them can hold the microphone.
 import json
 import os
 import platform
+import queue
 import threading
 import time
 from datetime import datetime, timedelta
@@ -135,7 +136,7 @@ class AppEngine:
     """Recording session + integrations, shared by every front end."""
 
     def __init__(self, on_line=None, on_state=None, front_end="app",
-                 on_partial=None):
+                 on_partial=None, on_level=None):
         """on_line(text)  — a newly transcribed line (background thread).
         on_state(status) — called whenever recording starts/stops.
         on_partial(text, label) — provisional words while somebody is still
@@ -147,6 +148,7 @@ class AppEngine:
         self._on_line = on_line or (lambda text: None)
         self._on_state = on_state or (lambda status: None)
         self._on_partial = on_partial
+        self._on_level = on_level
         self.front_end = front_end
 
         self._provider = None
@@ -160,6 +162,18 @@ class AppEngine:
         self.started_at = None     # float epoch seconds
         self.last_result = None    # the most recent stop_and_save() result
 
+        # Meetings whose words are saved and whose notes are still being
+        # written. See _notes_worker: one at a time, in the order they stopped.
+        self._notes_q = queue.Queue()
+        self._notes_thread = None
+        self._notes_seq = 0
+        self._notes_pending = 0    # queued or running, for "1 ahead" and quit
+        # Its own lock, not self._lock: this one is taken by the notes worker
+        # while self._lock may be held by a front end asking whether the engine
+        # is recording, and the two have nothing to say to each other.
+        self._notes_lock = threading.Lock()
+        self._on_notes = []
+
     # -- lazy pieces ---------------------------------------------------------
     @property
     def notetaker(self) -> NoteTaker:
@@ -167,6 +181,7 @@ class AppEngine:
         if self._notetaker is None:
             self._notetaker = NoteTaker(on_line=self._on_line,
                                         on_partial=self._on_partial,
+                                        on_level=self._on_level,
                                         provider=self.provider)
         return self._notetaker
 
@@ -247,28 +262,65 @@ class AppEngine:
         self._on_state(status)
         return status
 
-    def stop_and_save(self):
+    def stop_and_save(self, defer_notes=False):
         """Stop listening, write the files, and deliver per settings.
 
         Returns a result dict: title, transcript, summary, notes, delivered,
         error. ``error`` is set when there was nothing to save or the summary
         step failed; the transcript is still written in the latter case.
+
+        With ``defer_notes`` the call returns as soon as the **transcript** is
+        on disk, and the summary is written on a background worker instead.
+        That matters because summarising a real meeting on a local model takes
+        one to two minutes, and doing it here is what used to keep the
+        microphone -- and the Start button -- occupied for all of it. The
+        result then carries ``pending: True`` and a ``job`` id, and the notes
+        arrive later through :meth:`on_notes`.
+
+        Every other front end leaves it False and keeps the behaviour it has
+        always had: one call, everything written, nothing to subscribe to.
         """
         with self._lock:
             if not self.is_listening:
                 return {"error": "Not recording.", "title": None,
                         "transcript": None, "summary": None, "notes": None,
-                        "delivered": ""}
+                        "delivered": "", "pending": False, "job": None}
             event = self.event
 
         nt = self.notetaker
         nt.stop()
         _release_lock()
+        recorded = self.elapsed          # before started_at is cleared
+        self.event = None
+        self.started_at = None
+
+        if defer_notes:
+            pending, err = nt.save_transcript(event=event)
+            if pending is None:
+                self.release_model()
+                result = {"title": None, "transcript": None, "summary": None,
+                          "notes": None, "delivered": "", "pending": False,
+                          "job": None,
+                          "error": err or "Nothing was transcribed."}
+                self.last_result = result
+                self._on_state(self.status())
+                return result
+            job = self._notes_seq + 1
+            result = {
+                "title": pending.title or None,
+                "transcript": pending.transcript_path,
+                "summary": None, "notes": None, "delivered": "", "error": None,
+                "pending": True, "job": job, "recorded": recorded,
+            }
+            self._queue_notes(nt, pending, result)
+            # Deliberately not stored as last_result: that is "the last finished
+            # meeting", and this one is not finished. The notes job sets it.
+            self._on_state(self.status())
+            return result
+
         paths, err = nt.save(event=event)
         delivered = nt.deliver(event, paths) if paths else ""
 
-        self.event = None
-        self.started_at = None
         self.release_model()
         result = {
             "title": (paths or {}).get("title"),
@@ -277,10 +329,119 @@ class AppEngine:
             "notes": (paths or {}).get("notes"),
             "delivered": delivered,
             "error": err if paths else (err or "Nothing was transcribed."),
+            "pending": False, "job": None,
         }
         self.last_result = result
         self._on_state(self.status())
         return result
+
+    # -- notes written in the background -------------------------------------
+    def on_notes(self, callback):
+        """Subscribe to deferred notes jobs.
+
+        Called as ``callback(job, state, result)`` with state "queued",
+        "running", "done" or "failed". "queued" arrives on the caller's thread;
+        the rest arrive on the notes worker, so a UI has to marshal them onto
+        its own. ``result`` is the same dict :meth:`stop_and_save` returns —
+        carrying only the transcript while the notes are still being written,
+        and None on "running".
+
+        Every deferred stop announces itself this way, whoever asked for it:
+        the window's button, the hotkey, or the calendar scheduler ending a
+        meeting on its own. A front end therefore opens its view of a meeting
+        in one place instead of once per way of stopping.
+        """
+        self._on_notes.append(callback)
+
+    def pending_notes(self) -> int:
+        """Meetings queued or being summarised right now."""
+        with self._notes_lock:
+            return self._notes_pending
+
+    def _queue_notes(self, notetaker, pending, result):
+        """Hand one meeting's notes to the worker. Returns the job id."""
+        with self._notes_lock:
+            self._notes_seq += 1
+            job = self._notes_seq
+            self._notes_pending += 1
+        # Announced before it is queued, not after. Listeners open their view
+        # of a job on "queued", so a worker that is already awake and grabs the
+        # item the instant it lands must not be able to report "running" first.
+        self._say_notes(job, "queued", result)
+        self._notes_q.put((job, notetaker, pending))
+        # Started on first use and then left running: the thread costs nothing
+        # while the queue is empty, and re-creating it per meeting would race
+        # with a second Stop arriving during the first job.
+        if self._notes_thread is None or not self._notes_thread.is_alive():
+            self._notes_thread = threading.Thread(
+                target=self._notes_worker, name="notes", daemon=True)
+            self._notes_thread.start()
+        return job
+
+    def _notes_worker(self):
+        """Write queued notes, one meeting at a time.
+
+        Strictly serial, and that is the point. Both summary engines are a
+        local model on this machine's CPU; running two at once makes both slow
+        rather than either fast, and on the embedded engines it doubles the
+        memory a model already sized to the machine. A second meeting waits,
+        and the UI says it is waiting.
+        """
+        while True:
+            try:
+                job, notetaker, pending = self._notes_q.get(timeout=30)
+            except queue.Empty:
+                return          # idle: let the thread go, _queue_notes remakes it
+            self._say_notes(job, "running", None)
+            try:
+                paths, err = notetaker.write_notes(pending)
+                delivered = notetaker.deliver(pending.event, paths) if paths else ""
+                result = {
+                    "title": (paths or {}).get("title"),
+                    "transcript": (paths or {}).get("transcript"),
+                    "summary": (paths or {}).get("summary"),
+                    "notes": (paths or {}).get("notes"),
+                    "delivered": delivered, "error": err,
+                    "pending": False, "job": job,
+                }
+                self.last_result = result
+                self._say_notes(job, "failed" if err else "done", result)
+            except Exception as e:  # noqa: BLE001 - one bad meeting, not a dead worker
+                self._say_notes(job, "failed", {
+                    "title": pending.title or None,
+                    "transcript": pending.transcript_path,
+                    "summary": None, "notes": None, "delivered": "",
+                    "error": str(e), "pending": False, "job": job})
+            finally:
+                with self._notes_lock:
+                    self._notes_pending -= 1
+                    idle = self._notes_pending <= 0
+                self._notes_q.task_done()
+            # Only once nothing is left: the speech model is about to be needed
+            # again if the user is recording, and unloading it between two
+            # back-to-back meetings is the opposite of the point.
+            if idle:
+                self.release_model()
+
+    def _say_notes(self, job, state, result):
+        for callback in list(self._on_notes):
+            try:
+                callback(job, state, result)
+            except Exception as e:  # noqa: BLE001 - a listener never breaks a save
+                print(f"[notes] listener: {e}", flush=True)
+
+    def drain_notes(self, timeout=180):
+        """Block until queued notes are written. Returns True if the queue emptied.
+
+        Called on the way out. The transcripts are already safe on disk, so a
+        timeout here loses a summary and never a meeting -- but a summary the
+        user waited for and then lost by quitting is still the kind of thing
+        that makes an app feel untrustworthy, so we wait.
+        """
+        deadline = time.time() + timeout
+        while self.pending_notes() > 0 and time.time() < deadline:
+            time.sleep(0.2)
+        return self.pending_notes() <= 0
 
     def release_model(self):
         """Hand the speech model's memory back while idle (see
@@ -344,8 +505,14 @@ class AppEngine:
         except Exception:  # noqa: BLE001
             return []
 
-    def start_scheduler(self, on_message=None):
-        """Watch the calendar and record meetings automatically."""
+    def start_scheduler(self, on_message=None, defer_notes=False):
+        """Watch the calendar and record meetings automatically.
+
+        ``defer_notes`` is passed through to :meth:`stop_and_save` when a
+        meeting ends on its own. A front end that can show a summary being
+        written wants it; one that can only print a line when the whole thing
+        is finished does not.
+        """
         if self._scheduler is not None or self.provider is None:
             return False
         from scheduler import CalendarScheduler
@@ -358,7 +525,7 @@ class AppEngine:
 
         def _end(ev):
             say(f"meeting ended: {ev.title}")
-            self.stop_and_save()
+            self.stop_and_save(defer_notes=defer_notes)
 
         self._scheduler = CalendarScheduler(self.provider, _begin, _end,
                                             on_error=say)
@@ -435,11 +602,19 @@ class AppEngine:
         return hits
 
     # -- shutdown ------------------------------------------------------------
-    def shutdown(self):
-        """Stop everything, saving an in-progress session rather than losing it."""
+    def shutdown(self, on_wait=None):
+        """Stop everything, saving an in-progress session rather than losing it.
+
+        ``on_wait(n)`` is called with the number of meetings still being
+        summarised, so a front end can say why the window has not closed yet
+        instead of appearing to hang.
+        """
         self.stop_scheduler()
         result = None
         if self.is_listening:
+            # Synchronously: this is the last chance to write anything, so the
+            # deferred path -- which returns before the notes exist -- is the
+            # wrong one no matter who is quitting.
             result = self.stop_and_save()
         elif self._notetaker is not None and self._notetaker.has_unsaved():
             paths, err = self._notetaker.save(event=self.event)
@@ -449,6 +624,13 @@ class AppEngine:
                       "transcript": (paths or {}).get("transcript"),
                       "summary": (paths or {}).get("summary"),
                       "notes": (paths or {}).get("notes")}
+        # Meetings summarising in the background when the user hit quit. The
+        # words are already saved; these are the notes they are waiting for.
+        waiting = self.pending_notes()
+        if waiting > 0:
+            if on_wait is not None:
+                on_wait(waiting)
+            self.drain_notes()
         return result
 
 

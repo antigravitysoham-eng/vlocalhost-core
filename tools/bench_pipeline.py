@@ -69,13 +69,27 @@ _NUMBERS = {
 }
 
 
+#: Anything that is not a letter, a digit or an apostrophe is punctuation.
+#: Unicode-aware on purpose. The ASCII-only class this replaced
+#: (``[^a-z0-9' ]``) stripped Devanagari, Bengali and Tamil to nothing, so an
+#: Indic fixture scored a flat 100% WER however good the transcript was — a
+#: plausible-looking number rather than a visible failure. ``\w`` covers every
+#: script's letters and digits; underscore is excluded because it is not one.
+_PUNCT = re.compile(r"[^\w' ]+|_+", re.UNICODE)
+
+
 def normalise(text):
     """Words only, lowercased, digits spelled out.
 
     Punctuation, case and digit-versus-word are formatting choices, not
     transcription errors.
+
+    The digit folding is English-only, which is correct rather than a gap: it
+    exists because Whisper writes "20th" where the script says "twentieth". A
+    language whose numerals it does not fold misses the lookup and is compared
+    as written, which is the honest behaviour.
     """
-    words = re.sub(r"[^a-z0-9' ]+", " ", text.lower()).split()
+    words = _PUNCT.sub(" ", text.lower()).split()
     return [_NUMBERS.get(w, w) for w in words]
 
 

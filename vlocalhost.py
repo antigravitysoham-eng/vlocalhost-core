@@ -538,12 +538,28 @@ def main(argv):
     # First run, and a window is what they're getting: ask the setup questions
     # before the app opens. Skipped for the tray, the terminal and MCP, which
     # are either headless or driven by something that can't answer.
+    #
+    # Also skipped when Aurora is the window about to open, because Aurora asks
+    # them itself -- the same five questions, through `setup_wizard.options()`
+    # and `commit()`, so the answers and the settings written are identical.
+    # Running both would ask twice. The tkinter wizard is still what a machine
+    # gets when Aurora cannot open, which is the same fallback the window
+    # itself uses a few lines below.
     if not any(f in argv for f in ("--tray", "--no-tray", "--mcp",
                                    "--devices", "--connect", "--actions",
                                    "--do", "--record-on-start")):
         import setup_wizard
 
-        if setup_wizard.needed():
+        aurora_will_ask = False
+        if "--classic" not in argv:
+            try:
+                import ui_shell
+
+                aurora_will_ask = ui_shell.available()[0]
+            except Exception:                      # noqa: BLE001
+                aurora_will_ask = False
+
+        if setup_wizard.needed() and not aurora_will_ask:
             setup_wizard.run()
             settings.apply()
 
@@ -583,19 +599,47 @@ def main(argv):
     elif "--tray" in argv:
         run_tray(record_on_start="--record-on-start" in argv)
     else:
-        try:
+        # Four windows, best first, each falling back to the next. Aurora is
+        # the one this app is supposed to open; the other three are what a
+        # machine gets when it cannot.
+        #
+        # tkinter is kept rather than deleted, and it is not sentiment. Aurora
+        # needs a system webview -- WebView2 on Windows, WebKitGTK on Linux --
+        # and that is one more thing that can be absent on a machine we will
+        # never see. The tkinter window has shipped for a year and needs
+        # nothing but Python. Losing the new look is a worse day than losing
+        # the app, so a missing webview costs the look and not the recording.
+        #
+        # `--classic` forces it, for somebody who prefers it or is telling us
+        # about a bug in the new one.
+        def open_aurora():
+            import ui_shell
+
+            # argv goes through so the window's own flags work from here too,
+            # not only from the Pro launcher -- otherwise `--appearance=light`
+            # is silently ignored on the entry point most people actually run.
+            return ui_shell.run(record_on_start="--record-on-start" in argv,
+                                argv=argv)
+
+        def open_tk():
             import gui
 
-            gui.run(record_on_start="--record-on-start" in argv)
-        except Exception as e:  # noqa: BLE001 - no display, no Tk, etc.
-            print(f"Window unavailable ({e}); falling back to the tray.\n",
-                  flush=True)
+            return gui.run(record_on_start="--record-on-start" in argv)
+
+        windows = [open_tk] if "--classic" in argv else [open_aurora, open_tk]
+        for attempt in windows:
             try:
-                run_tray()
-            except Exception as tray_error:  # noqa: BLE001
-                print(f"Tray unavailable ({tray_error}); using terminal mode.\n",
+                attempt()
+                return 0
+            except Exception as e:  # noqa: BLE001 - no webview, no display, no Tk
+                print(f"Window unavailable ({e}); trying the next one.\n",
                       flush=True)
-                run_cli()
+        try:
+            run_tray()
+        except Exception as tray_error:  # noqa: BLE001
+            print(f"Tray unavailable ({tray_error}); using terminal mode.\n",
+                  flush=True)
+            run_cli()
     return 0
 
 

@@ -473,7 +473,7 @@ class _Segmenter:
     utterance — is derived from whichever is in use.
     """
 
-    def __init__(self, on_utterance, label, on_partial=None):
+    def __init__(self, on_utterance, label, on_partial=None, on_level=None):
         self.on_utterance = on_utterance
         #: Called with the audio captured *so far*, while somebody is still
         #: talking, so a UI can show provisional text instead of nothing. Left
@@ -481,6 +481,22 @@ class _Segmenter:
         #: it — and then no partial is ever built or decoded, so they pay
         #: nothing for a feature they cannot use.
         self.on_partial = on_partial
+        #: ``on_level(dbfs, speech, label)`` — how loud the room is, and whether
+        #: the detector called this frame speech. Same opt-in shape as
+        #: ``on_partial``: a front end with no meter passes nothing, and then
+        #: none of the arithmetic below ever runs.
+        #:
+        #: It reports the *peak* since the last call rather than the level at
+        #: one instant. A meter sampled on a timer misses the syllable that
+        #: falls between two samples and so reads quiet during exactly the
+        #: speech it exists to show. Throttling belongs here for the same
+        #: reason: this is the only place that knows the frame rate, and a
+        #: callback crossing a JS bridge fifty times a second is a cost the
+        #: audio thread should not be paying.
+        self.on_level = on_level
+        self._level_peak = 0.0
+        self._level_speech = False
+        self._level_count = 0
         self.label = label
         self.detector = build_detector()
         self.frame_size = self.detector.frame_size
@@ -489,6 +505,10 @@ class _Segmenter:
         frame_ms = self.detector.frame_ms
         self._padding = max(1, int(config.SILENCE_TIMEOUT_MS / frame_ms))
         self._min_frames = int(config.MIN_UTTERANCE_MS / frame_ms)
+        # ~12 level reports a second. Fast enough that the meter moves with the
+        # voice, slow enough that the bridge is not the bottleneck. Whole
+        # frames, so it stays locked to the audio rather than to a clock.
+        self._level_every = max(1, int(80 / frame_ms))
         onset_ms = getattr(config, "VAD_ONSET_MS", 160)
         self._onset_frames = max(1, int(onset_ms / frame_ms))
         self._onset_ratio = float(getattr(config, "VAD_ONSET_RATIO", 0.6))
@@ -509,11 +529,45 @@ class _Segmenter:
         self._triggered = False
         self._voiced = []
 
+    def _level(self, frame, is_speech):
+        """Accumulate loudness, and report the peak every few frames.
+
+        Only reached when a front end asked for it. Everything here is cheap —
+        one RMS over 512-odd samples — but it runs on the capture thread, so it
+        is kept to arithmetic and never touches the consumer more than about
+        twelve times a second.
+
+        Errors are swallowed on purpose. A meter is decoration; a listener that
+        raises into the capture thread would take the recording down with it,
+        and losing the meeting to save the meter is the wrong way round.
+        """
+        samples = np.frombuffer(frame, dtype=np.int16)
+        if samples.size:
+            rms = float(np.sqrt(np.mean(np.square(samples.astype(np.float32)))))
+            self._level_peak = max(self._level_peak, rms)
+        self._level_speech = self._level_speech or is_speech
+        self._level_count += 1
+        if self._level_count < self._level_every:
+            return
+
+        peak, speech = self._level_peak, self._level_speech
+        self._level_peak, self._level_speech, self._level_count = 0.0, False, 0
+        # dBFS against a full-scale int16. Floored at -60, which is the bottom
+        # of the meter: below that the number is dithering noise and a scale
+        # that keeps going just makes the quiet end twitch.
+        dbfs = -60.0 if peak <= 0 else max(-60.0, 20.0 * np.log10(peak / 32768.0))
+        try:
+            self.on_level(float(dbfs), bool(speech), self.label)
+        except Exception:                                      # noqa: BLE001
+            pass
+
     def feed(self, frame):
         """Consume one frame of raw 16-bit mono PCM."""
         if len(frame) != self.bytes_per_frame:
             return  # partial block — the VAD only accepts exact frame sizes
         is_speech = self.detector.is_speech(frame)
+        if self.on_level is not None:
+            self._level(frame, is_speech)
 
         if not self._triggered:
             self._lead.append(frame)
@@ -626,10 +680,12 @@ class SoundcardMicListener:
 
     kind = "microphone"
 
-    def __init__(self, on_utterance, label=None, device=None, on_partial=None):
+    def __init__(self, on_utterance, label=None, device=None, on_partial=None,
+                 on_level=None):
         self.label = config.LABEL_ME if label is None else label
         self.device = device if device is not None else config.INPUT_DEVICE
-        self._seg = _Segmenter(on_utterance, self.label, on_partial=on_partial)
+        self._seg = _Segmenter(on_utterance, self.label, on_partial=on_partial,
+                                on_level=on_level)
         self._running = False
         self._worker = None
 
@@ -694,13 +750,15 @@ class MicListener:
 
     kind = "microphone"
 
-    def __init__(self, on_utterance, label=None, device=None, on_partial=None):
+    def __init__(self, on_utterance, label=None, device=None, on_partial=None,
+                 on_level=None):
         """on_utterance(pcm_bytes, label) per detected speech segment."""
         # label="" means single-source capture: nothing to distinguish, so the
         # transcript stays unlabelled.
         self.label = config.LABEL_ME if label is None else label
         self.device = device if device is not None else config.INPUT_DEVICE
-        self._seg = _Segmenter(on_utterance, self.label, on_partial=on_partial)
+        self._seg = _Segmenter(on_utterance, self.label, on_partial=on_partial,
+                                on_level=on_level)
         self._q = queue.Queue()
         self._running = False
         self._stream = None
@@ -876,9 +934,10 @@ class LoopbackListener:
 
     kind = "system audio"
 
-    def __init__(self, on_utterance, label=None, on_partial=None):
+    def __init__(self, on_utterance, label=None, on_partial=None, on_level=None):
         self.label = config.LABEL_THEM if label is None else label
-        self._seg = _Segmenter(on_utterance, self.label, on_partial=on_partial)
+        self._seg = _Segmenter(on_utterance, self.label, on_partial=on_partial,
+                                on_level=on_level)
         self._running = False
         self._worker = None
 
@@ -1044,7 +1103,7 @@ class MultiListener:
         return [listener.kind for listener in self.listeners]
 
 
-def build_listener(on_utterance, on_partial=None):
+def build_listener(on_utterance, on_partial=None, on_level=None):
     """The capture pipeline described by ``config.CAPTURE_MODE``.
 
     ``"mic"``  — your microphone only (the original behaviour).
@@ -1078,11 +1137,15 @@ def build_listener(on_utterance, on_partial=None):
         pass
 
     if mode == "mic":
-        return mic_class(on_utterance, label="", on_partial=on_partial)
+        return mic_class(on_utterance, label="", on_partial=on_partial,
+                         on_level=on_level)
     if mode == "system":
-        return LoopbackListener(on_utterance, label="", on_partial=on_partial)
-    return MultiListener([mic_class(on_utterance, on_partial=on_partial),
-                          LoopbackListener(on_utterance, on_partial=on_partial)])
+        return LoopbackListener(on_utterance, label="", on_partial=on_partial,
+                                on_level=on_level)
+    return MultiListener([mic_class(on_utterance, on_partial=on_partial,
+                                    on_level=on_level),
+                          LoopbackListener(on_utterance, on_partial=on_partial,
+                                           on_level=on_level)])
 
 
 # Back-compat: earlier code constructed AudioListener directly with a callback

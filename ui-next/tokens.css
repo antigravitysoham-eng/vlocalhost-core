@@ -1,0 +1,154 @@
+/* Vlocalhost — Aurora tokens.
+ *
+ * From 3-brand/app-ui-aurora-light.html (Direction 01, light). The palette,
+ * the radii and the aurora wash are Aurora's. What changed, and why:
+ *
+ * 1. SMALL TEXT GOT ITS OWN TOKENS. Aurora's amber #E08A17 measures 2.69:1 on
+ *    white and its mint #0FA894 measures 2.98:1 — against a 4.5:1 floor for
+ *    text up to 17pt (accessibility.md › Color and effects). Those two carry
+ *    the timestamp citation and the "0 bytes out" pill, which Aurora's own
+ *    captions call "the product" and "the whole privacy argument". The two
+ *    most important marks on the screen were the two least legible.
+ *
+ *    So each accent now has two tokens: the BRAND value, unchanged, for fills
+ *    and strokes where contrast rules do not apply, and a TEXT value at the
+ *    same hue and lower lightness for anything set small. Aurora looks the
+ *    same; its labels can be read.
+ *
+ * 2. NOTHING BELOW 11px. Aurora sets labels at .58rem (9.3px) and timestamps
+ *    at .62rem (9.9px). typography.md › Specifications puts the macOS minimum
+ *    at 10pt with 13pt the default.
+ *
+ * 3. A DARK APPEARANCE EXISTS. dark-mode.md: "Avoid offering an app-specific
+ *    appearance setting… they may think your app is broken because it doesn't
+ *    respond to their systemwide appearance choice." Aurora is light by
+ *    identity, so light is the default and dark follows the system.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* ---- surfaces ---- */
+  --paper:    #FBFAFD;
+  --paper-2:  #FFFFFF;
+  --wash:     #F4F2F9;
+
+  /* ---- content ---- */
+  --ink:    #0F1117;   /* 18.9:1 on paper-2 */
+  --ink-2:  #3A4050;   /* 10.4:1 */
+  --ink-3:  #6E768B;   /*  4.5:1 — was #767E92 at 4.06:1 */
+  --ink-4:  #6B7691;   /*  4.5:1 — was #A7AEBE at 2.22:1, used on every label */
+
+  --line:   rgba(15, 17, 23, .07);
+  --line-2: rgba(15, 17, 23, .12);
+
+  /* ---- accents: brand value, then the legible text value ---- */
+  --amber:      #E08A17;   /* strokes, the left rule on a fact */
+  --amber-l:    #FFB43D;   /* fills: the meter, the logo, a switch */
+  --amber-text: #A86811;   /* 4.5:1 on white — citations, small labels */
+  --amber-soft: rgba(255, 180, 61, .16);
+  --amber-on-soft: #A06210; /* 4.5:1 on the soft ground */
+
+  --mint:       #0FA894;
+  --mint-text:  #0C8575;   /* 4.5:1 on white */
+  --mint-soft:  rgba(56, 225, 206, .18);
+  --mint-on-soft: #0B7E6F; /* 4.5:1 on the soft ground */
+
+  --lilac:      #8B7CF0;
+  --lilac-text: #7361ED;   /* 4.5:1 on white */
+  --lilac-soft: rgba(139, 124, 240, .14);
+
+  --risk:      #E7626F;
+  --risk-text: #C3283A;    /* 4.5:1 on white */
+
+  /* ---- type ----
+   * Aurora specifies Inter Tight + IBM Plex Mono from Google Fonts. A stylesheet
+   * link is a network request on launch, and this app's entire claim is that it
+   * makes none — the pill in the corner says "0 bytes out" while the page is
+   * still fetching a font. So the stack is the system's, and if the brand faces
+   * are wanted they get bundled as local files, never linked.
+   */
+  --f: "Inter Tight", ui-sans-serif, -apple-system, "SF Pro Text",
+       "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --m: "IBM Plex Mono", ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
+
+  --t-h:     800 30px/1.08 var(--f);
+  --t-title: 600 15px/1.35 var(--f);
+  --t-body:  400 14px/1.6  var(--f);
+  --t-prose: 400 15px/1.65 var(--f);
+  --t-label: 500 11px/1.3  var(--m);   /* the floor */
+  --t-data:  400 12px/1.4  var(--m);
+  /* The explanatory line under a control. 13px is the macOS default body size
+     (typography.md › Specifications), which is the right size for a sentence
+     that has to be read rather than glanced at. */
+  --t-hint:  400 13px/1.5  var(--f);
+  --track: .16em;
+
+  /* ---- shape and space ---- */
+  --r:    22px;
+  --r-md: 18px;
+  --r-sm: 12px;
+  --shadow:    0 1px 2px rgba(15, 17, 23, .04), 0 12px 32px -12px rgba(15, 17, 23, .10);
+  --shadow-lg: 0 2px 4px rgba(15, 17, 23, .04), 0 40px 80px -32px rgba(15, 17, 23, .20);
+
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 22px; --s6: 34px;
+
+  /* designing-for-macos + accessibility.md: desktop controls default 28x28pt,
+     minimum 20x20. This is the hit region, not the painted size. */
+  --hit: 28px;
+
+  --glow: .55;
+}
+
+/* The dark appearance follows the system, and only the system.
+ *
+ * dark-mode.md forbids an app-specific appearance setting — "they may think
+ * your app is broken because it doesn't respond to their systemwide appearance
+ * choice". A second [data-appearance] copy of this block used to sit below,
+ * driven by ?appearance=light|dark, so both could be inspected on one machine
+ * during review. It was always marked as shipping out of the real build, and
+ * it went out on 15 Sep 2026 along with the query-string readers in app.js and
+ * the flags in shell.py. All four were one affordance and they left together.
+ */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper:   #0B0D13;
+    --paper-2: #141821;
+    --wash:    #10131B;
+
+    --ink:   #ECEEF4;   /* 14.9:1 on paper-2 */
+    --ink-2: #B4BBCB;   /*  8.2:1 */
+    --ink-3: #8F98AC;   /*  5.3:1 */
+    --ink-4: #828BA0;   /*  4.6:1 */
+
+    --line:   rgba(236, 238, 244, .09);
+    --line-2: rgba(236, 238, 244, .16);
+
+    /* On a dark ground the bright brand values are already legible, so the
+       text tokens go back up rather than down. */
+    --amber-text: #FFC163;
+    --amber-on-soft: #FFC163;
+    --amber-soft: rgba(255, 180, 61, .14);
+    --mint-text: #4FE3D1;
+    --mint-on-soft: #4FE3D1;
+    --mint-soft: rgba(56, 225, 206, .12);
+    --lilac-text: #A99BF7;
+    --lilac-soft: rgba(139, 124, 240, .16);
+    --risk-text: #FF8A94;
+
+    --shadow:    0 1px 2px rgba(0, 0, 0, .5), 0 12px 32px -12px rgba(0, 0, 0, .7);
+    --shadow-lg: 0 2px 4px rgba(0, 0, 0, .5), 0 40px 80px -32px rgba(0, 0, 0, .9);
+    --glow: .30;
+  }
+}
+
+/* accessibility.md: provide a higher-contrast scheme when Increase Contrast
+   is on. The tertiary tone retires and the aurora stops washing the ground. */
+@media (prefers-contrast: more) {
+  :root {
+    --ink-4: var(--ink-2);
+    --ink-3: var(--ink-2);
+    --line: var(--line-2);
+    --glow: 0;
+  }
+}

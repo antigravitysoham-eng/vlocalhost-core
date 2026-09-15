@@ -11,6 +11,14 @@
 # macos-arm64, macos-x64 and linux-x64 and re-read their SBOMs before the next
 # release.
 #
+# SECOND EXCEPTION, same shape, also needs closing: the seven entries marked
+# "pywebview brings this" were resolved on a windows-x64 developer machine when
+# the Aurora window was added, NOT read back from a release SBOM -- there has
+# been no build since. The four pyobjc-* framework pins are the weakest of the
+# seven: pyobjc ships its frameworks in lockstep, so 12.2.2 matches the three
+# siblings already in this file, but that is an inference and not a reading.
+# Rebuild all four targets and re-read their SBOMs before the next release.
+#
 #     pip install -r requirements.txt -c constraints.txt
 #
 # The nine direct dependencies are pinned in requirements.txt; this file locks
@@ -40,11 +48,13 @@
 # "No matching distribution found for cpython".
 anyio==4.14.2
 av==18.1.0
+bottle==0.13.4   # pywebview brings this; never started, see requirements.txt
 certifi==2026.7.22
 cffi==2.1.1
 charset-normalizer==3.5.1
 click==8.5.0
 colorama==0.4.6   # windows only
+clr-loader==0.3.1   # windows only; pywebview brings this via pythonnet
 coloredlogs==15.0.1   # macos-x64 only
 ctranslate2==4.8.1
 filelock==3.32.4
@@ -65,12 +75,17 @@ msal==1.28.0
 onnxruntime==1.23.2 ; sys_platform == "darwin" and platform_machine == "x86_64"
 onnxruntime==1.29.0 ; sys_platform != "darwin" or platform_machine != "x86_64"
 packaging==26.3
+proxy_tools==0.1.0   # pywebview brings this
 protobuf==7.36.0
 pycparser==3.0
 pyobjc-core==12.2.2   # macos-arm64, macos-x64 only
 pyobjc-framework-cocoa==12.2.2   # macos-arm64, macos-x64 only
 pyobjc-framework-quartz==12.2.2   # macos-arm64, macos-x64 only
+pyobjc-framework-security==12.2.2   # macOS only; pywebview brings this
+pyobjc-framework-uniformtypeidentifiers==12.2.2   # macOS only; pywebview brings this
+pyobjc-framework-webkit==12.2.2   # macOS only; pywebview brings this
 python-xlib==0.33   # linux only
+pythonnet==3.1.0   # windows only; pywebview brings this
 pyyaml==6.0.3
 setuptools==84.0.0
 six==1.17.0

@@ -27,8 +27,9 @@ removes the single most common install failure: no Python, or a Python that is
 too old, or a Python from the Microsoft Store with a read-only site-packages.
 
 Not the Windows *embeddable* distribution, which is the obvious candidate and
-does not include ``tkinter`` or ``pip`` — the app is tkinter from top to
-bottom, so that build cannot start. python-build-standalone's ``install_only``
+does not include ``tkinter`` or ``pip`` — the app still falls back to a
+tkinter window when no system webview is available, so that build cannot
+start. python-build-standalone's ``install_only``
 archives are complete, and are explicitly meant to be redistributed.
 """
 
@@ -77,7 +78,11 @@ _HOST = {
 #: Copied into the bundle. Everything else in the repo is for developers.
 INCLUDE_FILES = ("requirements.txt", "constraints.txt", "LICENSE", "README.md",
                  "TRADEMARK.md")
-INCLUDE_DIRS = ("integrations", "assets", "docs")
+#: ``ui-next`` is the Aurora window: index.html and two stylesheets as well as
+#: Python. It is data, not only source, so it cannot ride along on the ``*.py``
+#: rule in :func:`copy_app` -- leave it out and the app installs, launches, and
+#: shows an empty frame.
+INCLUDE_DIRS = ("integrations", "assets", "docs", "ui-next")
 SKIP_DIRS = {"__pycache__", ".git", ".github", "tools", "notes", ".venv",
              "dist", "build"}
 
@@ -368,15 +373,38 @@ def zip_bundle(staging, out_dir, target):
     return archive
 
 
+#: The window is HTML, so its files are data and no import can prove they are
+#: there. A missing stylesheet does not raise — it ships a page with no design,
+#: which is worse than a crash because the build stays green.
+PAGE_FILES = ("index.html", "app.js", "app.css", "tokens.css", "api.py",
+              "shell.py")
+
+
 def smoke_test(runtime, app_dir):
     """Prove the bundle can import the app before anyone downloads it."""
     python = interpreter(runtime)
     log("smoke-testing the bundle")
+
+    ui = os.path.join(app_dir, "ui-next")
+    missing = [f for f in PAGE_FILES if not os.path.isfile(os.path.join(ui, f))]
+    if missing:
+        raise SystemExit(
+            "the Aurora window is incomplete in this bundle: "
+            + ", ".join(missing)
+            + f"\nlooked in {ui}\nis 'ui-next' still in INCLUDE_DIRS?")
+
     checks = (
-        "import tkinter; tkinter.Tcl()",          # the GUI toolkit exists
+        "import tkinter; tkinter.Tcl()",          # the fallback toolkit exists
         "import faster_whisper, numpy, requests",  # the heavy deps import
         "import sounddevice",                      # PortAudio binding loads
         "import vlocalhost, engine, settings, migrate, setup_wizard",
+        # The window and its bridge. `available()` checks pywebview *and* that
+        # the page is on disk, which is the pair that actually decides whether
+        # anyone sees Aurora rather than the tkinter fallback.
+        "import webview",
+        "import ui_shell; ok, why = ui_shell.available(); assert ok, why",
+        # Setup must work without Tk, because that is the build Aurora is for.
+        "import setup_wizard as w; w.options(); assert w.plan({}) == {}",
     )
     for snippet in checks:
         result = subprocess.run([python, "-c", snippet], cwd=app_dir,

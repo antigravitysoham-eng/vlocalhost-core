@@ -10,6 +10,7 @@ import re
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from datetime import datetime
 
 import config
@@ -75,21 +76,47 @@ def _unique(path):
     return f"{root}-{i}{ext}"
 
 
+@dataclass
+class Pending:
+    """A meeting whose words are saved and whose notes are not yet written.
+
+    Handed from :meth:`NoteTaker.save_transcript` to :meth:`NoteTaker.write_notes`,
+    across a thread and quite possibly after the *next* meeting has already
+    started recording. So it carries everything the notes step needs and holds
+    no reference to live recorder state -- the recorder has moved on.
+    """
+
+    transcript: str
+    transcript_path: str
+    base: str
+    title: str
+    titled: bool          # True when a calendar event named it: no model call
+    stamp: str
+    out_dir: str
+    event: object = None
+
+
 class NoteTaker:
-    def __init__(self, on_line=None, provider=None, on_partial=None):
+    def __init__(self, on_line=None, provider=None, on_partial=None,
+                 on_level=None):
         """on_line(text) is called for each newly transcribed line (for live UI).
         on_partial(text, label) is called with provisional text while somebody
         is still speaking — pass it only if you have somewhere to show it.
         provider: optional CalendarProvider for naming/email/post-back."""
         self.on_line = on_line or (lambda text: None)
         self.on_partial = on_partial
+        #: Input level for a meter, if the front end has one. Passed straight
+        #: down: nothing here reads it, so there is nothing here to keep in
+        #: step with it.
+        self.on_level = on_level
         self.provider = provider
 
         self.transcriber = build_transcriber()  # faster-whisper, or your own engine
         # Mic, system audio, or both — see config.CAPTURE_MODE.
         self.listener = build_listener(
             self._on_utterance,
-            on_partial=self._on_partial if on_partial else None)
+            on_partial=self._on_partial if on_partial else None,
+            on_level=on_level)
 
         self._utt_q = queue.Queue()
         # Provisional audio waits in a single slot, not a queue. A newer
@@ -270,54 +297,79 @@ class NoteTaker:
         """True if there's transcript content that hasn't been written to disk."""
         return self._dirty and bool(self.transcript_text().strip())
 
-    def save(self, event=None):
-        """Name the meeting, then write the transcript (.txt) and summary (.md).
-        Files are named ``<date>_<meeting-title>``. When ``event`` is given, its
-        calendar title is used instead of asking the model to invent one.
-        Returns (paths, error); ``paths['title']`` is the human meeting name and
-        ``paths['notes']`` is the summary as plain text (for emailing/posting back)."""
+    def save_transcript(self, event=None):
+        """Write the words to disk and nothing else. Returns ``(Pending, error)``.
+
+        Split out of :meth:`save` because the two halves cost wildly different
+        amounts. This half is file I/O -- milliseconds. The other half is one
+        or two local model calls and takes a minute or more on a real meeting.
+        A caller that needs the microphone back immediately (the window, so the
+        next meeting can start) runs this, returns, and hands the ``Pending``
+        to :meth:`write_notes` on a background worker.
+        """
         transcript = self.transcript_text()
         if not transcript.strip():
             return None, "Nothing was transcribed — no notes to save."
 
         out_dir = store.notes_dir()
-        date = datetime.now().strftime("%Y-%m-%d")
         stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-        # Prefer the real calendar title; otherwise ask the model to name it,
-        # falling back to a timestamp if Ollama is unreachable.
-        title = (event.title if event and event.title else "") or generate_title(transcript)
-        # Clean the title once, so the heading inside the file and the name on
-        # disk agree. Stripping only in _slugify left a file called
-        # "...-ptacotty-meeting-summary.txt" whose first line read "ptacotty
-        # meeting transcript", which is the same confusion one layer down.
-        # A calendar title is the user's own words and is left alone.
-        if not (event and event.title):
-            title = _clean_title(title)
-        base = f"{date}_{_slugify(title)}" if title else f"meeting_{stamp}"
+        # A calendar event names the meeting for free. Without one the name has
+        # to come from the model, and that is a call we are deliberately not
+        # making yet -- so the file takes a timestamp now and its real name
+        # later, in _rename_to_title.
+        titled = bool(event and event.title)
+        if titled:
+            title = event.title
+            base = f"{datetime.now().strftime('%Y-%m-%d')}_{_slugify(title)}"
+        else:
+            title = ""
+            base = f"meeting_{stamp}"
 
-        # Both files say what they are. They used to be "<base>.txt" and
-        # "<base>-notes.md", which reads fine until the model titles a
-        # meeting something like "ptacotty meeting transcript" -- and then
-        # the folder holds "...-transcript.txt" and
-        # "...-transcript-notes.md" and neither looks like the summary.
-        # That happened, and the summary was reported missing when it was
-        # sitting right there.
         transcript_path = _unique(os.path.join(out_dir, f"{base}-transcript.txt"))
         header = title or "Meeting Transcript"
         with open(transcript_path, "w", encoding="utf-8") as f:
             f.write(f"{header}\n{'=' * len(header)}\nSaved: {stamp}\n\n"
                     f"{transcript}\n")
 
+        # The words are on disk, which is the whole of what _dirty guards. An
+        # unwritten summary is not unsaved work in that sense: it can be made
+        # again from this file, and the audio it came from cannot.
+        self._dirty = False
+        return Pending(transcript=transcript, transcript_path=transcript_path,
+                       base=base, title=title, titled=titled, stamp=stamp,
+                       out_dir=out_dir, event=event), None
+
+    def write_notes(self, pending):
+        """Name the meeting, summarise it, write the summary beside the
+        transcript. The slow half of :meth:`save`.
+
+        Takes the :class:`Pending` from :meth:`save_transcript` and returns the
+        same ``(paths, error)`` pair :meth:`save` has always returned.
+        """
+        transcript = pending.transcript
+        base = pending.base
+        title = pending.title
+
+        if not pending.titled:
+            # Clean the title once, so the heading inside the file and the name
+            # on disk agree. Stripping only in _slugify left a file called
+            # "...-ptacotty-meeting-summary.txt" whose first line read
+            # "ptacotty meeting transcript", which is the same confusion one
+            # layer down. A calendar title is the user's own words and is left
+            # alone. An unreachable model returns "", and the meeting keeps the
+            # timestamp name it already has.
+            title = _clean_title(generate_title(transcript))
+            if title:
+                base = self._rename_to_title(pending, title)
+
         summary_error = None
         notes = None
-        summary_path = _unique(os.path.join(out_dir, f"{base}-summary.txt"))
+        summary_path = _unique(os.path.join(pending.out_dir, f"{base}-summary.txt"))
         try:
             # A meeting too long for the model's context window is summarised in
             # parts, and that takes minutes rather than seconds. Say so as it
-            # goes: the window is already showing this transcript, so the line
-            # lands where the user is looking, and a long silence after Stop is
-            # indistinguishable from a hang.
+            # goes: a long silence is indistinguishable from a hang.
             def progress(done, total):
                 if total > 1:
                     self.on_line(f"[notes] summarising part {done} of {total}...")
@@ -338,9 +390,56 @@ class NoteTaker:
             summary_error = str(e)
             summary_path = None
 
-        self._dirty = False  # written to disk; don't re-save on quit
-        return ({"transcript": transcript_path, "summary": summary_path,
+        return ({"transcript": pending.transcript_path, "summary": summary_path,
                  "title": title or base, "notes": notes}, summary_error)
+
+    def _rename_to_title(self, pending, title):
+        """Give the transcript its real name, now that the model has supplied
+        one. Returns the base the summary should use.
+
+        Both files say what they are, and both must agree. They used to be
+        "<base>.txt" and "<base>-notes.md", which reads fine until the model
+        titles a meeting something like "ptacotty meeting transcript" -- and
+        then the folder holds "...-transcript.txt" and "...-transcript-notes.md"
+        and neither looks like the summary. That happened, and the summary was
+        reported missing when it was sitting right there.
+
+        So when the rename fails -- Windows locks a file somebody has open, and
+        by now the user has had a minute to open it -- the provisional base is
+        returned unchanged and the summary is named to match the transcript
+        where it actually is. A matching ugly pair beats a mismatched pretty one.
+        """
+        base = f"{datetime.now().strftime('%Y-%m-%d')}_{_slugify(title)}"
+        target = _unique(os.path.join(pending.out_dir, f"{base}-transcript.txt"))
+        try:
+            os.replace(pending.transcript_path, target)
+        except OSError as e:
+            print(f"[notes] keeping {os.path.basename(pending.transcript_path)}"
+                  f" — could not rename: {e}", flush=True)
+            return pending.base
+        pending.transcript_path = target
+        # The base, not the name the file actually got. Two meetings titled the
+        # same on the same day make _unique append "-2" to the second, and the
+        # summary then wants "<base>-summary-2.txt" -- which is what _unique
+        # gives it on its own. Deriving the base back out of the file name
+        # instead produced "..._pricing-review-t-summary.txt", because the "-2"
+        # moved the suffix and the strip cut into the title.
+        return base
+
+    def save(self, event=None):
+        """Name the meeting, then write the transcript (.txt) and summary (.md).
+        Files are named ``<date>_<meeting-title>``. When ``event`` is given, its
+        calendar title is used instead of asking the model to invent one.
+        Returns (paths, error); ``paths['title']`` is the human meeting name and
+        ``paths['notes']`` is the summary as plain text (for emailing/posting back).
+
+        Both halves back to back, for callers that can afford to wait. Callers
+        that cannot run the two themselves -- see :meth:`save_transcript`.
+        """
+        pending, err = self.save_transcript(event=event)
+        if pending is None:
+            return None, err
+        return self.write_notes(pending)
 
     def deliver(self, event, paths):
         """Best-effort: email the notes to attendees and/or write them back onto

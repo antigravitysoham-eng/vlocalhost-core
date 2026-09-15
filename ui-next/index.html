@@ -1,0 +1,853 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vlocalhost — Aurora</title>
+<!-- No font link. This app's claim is that it makes no network requests, and a
+     stylesheet from fonts.googleapis.com is one, made on launch, while the pill
+     in the corner reads "0 bytes out". Brand faces get bundled locally or not
+     used. See tokens.css. -->
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div class="sky" aria-hidden="true"><b></b><b></b><b></b></div>
+
+<!-- ================================================== FIRST RUN ========= -->
+<!-- The five questions setup has always asked, in this window instead of a
+     tkinter one. Same order, same wording, same defaults, same settings
+     written at the end — `setup_wizard.plan()` does the deciding for both, so
+     they cannot answer differently.
+
+     It is a cover over the app rather than a sixth screen: setup is finished
+     once and then never seen again, and a nav item for it would be a nav item
+     that is wrong on every run after the first. -->
+<div class="setup" id="setup" hidden>
+  <div class="setup-card" role="dialog" aria-modal="true" aria-labelledby="su-h">
+    <div class="setup-step" id="su-step">Step 1 of 5</div>
+    <h1 class="h" id="su-h">Everything stays on this machine</h1>
+    <p class="setup-sub" id="su-sub">A few quick questions and you're recording.
+      Every answer can be changed later in Settings.</p>
+
+    <div class="setup-body" id="su-body"></div>
+
+    <div class="setup-foot">
+      <button class="btn" id="su-back">Back</button>
+      <span class="setup-outcome" id="su-outcome"></span>
+      <button class="btn primary" id="su-next">Next</button>
+    </div>
+  </div>
+</div>
+
+<div class="app">
+  <div class="chrome">
+    <svg width="22" height="22" viewBox="0 0 200 200" aria-hidden="true">
+      <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#CA8A04"/><stop offset="55%" stop-color="#EAB308"/>
+        <stop offset="100%" stop-color="#FACC15"/></linearGradient></defs>
+      <rect width="200" height="200" rx="44" fill="url(#g)"/>
+      <g transform="translate(19.11 23.39) scale(0.7778)" fill="#fff">
+        <rect x="23" y="44" width="22" height="36" rx="11"/>
+        <rect x="54" y="79" width="22" height="42" rx="11"/>
+        <rect x="85" y="114" width="22" height="48" rx="11"/>
+        <rect x="116" y="79" width="22" height="42" rx="11"/>
+        <circle cx="158" cy="62" r="27"/><path d="M 143 79 L 131 100 L 163 81 Z"/>
+      </g>
+    </svg>
+    <span class="t" id="chrome-title">Vlocalhost AI</span>
+  </div>
+
+  <div class="shell">
+    <nav class="nav" aria-label="Sections">
+      <div class="g">Session</div>
+      <button data-screen="record" aria-current="page"><span class="dot"></span>Recording</button>
+      <button data-screen="library"><span class="dot"></span>Library</button>
+      <div class="g">Intelligence</div>
+      <button data-screen="ask"><span class="dot"></span>Ask</button>
+      <div class="g">Machine</div>
+      <button data-screen="assistants"><span class="dot"></span>Assistants</button>
+      <button data-screen="settings"><span class="dot"></span>Settings</button>
+      <div class="foot"><b></b>ON-DEVICE</div>
+    </nav>
+
+    <div class="body" id="body">
+
+      <!-- ============================================ RECORDING ========== -->
+      <section class="screen" id="screen-record">
+        <span class="pill live" id="live-pill"><b></b><span id="live-text">Idle · 0 bytes out</span></span>
+        <h1 class="h" id="rec-title">Ready to record</h1>
+        <div class="meta" id="rec-meta">No session</div>
+
+        <!-- The meter is the page. -->
+        <div class="wave" id="wave" role="img" aria-label="Input level meter"></div>
+        <div class="scale">
+          <span>−60 dB</span>
+          <span id="gate">Silence gated · nothing transcribed yet</span>
+          <span>0 dB</span>
+        </div>
+
+        <!-- Checked once, when the window opens, and shown only when the answer
+             is bad. Recording works without a notes engine and the transcript
+             is always saved -- but the summary is not, and finding that out
+             after sitting through an hour-long meeting is the worst possible
+             moment to learn it. So it is said before the button, not after the
+             recording. -->
+        <div class="notready" id="notready" hidden>
+          <strong>Recording works. Notes will not be written yet.</strong>
+          <span id="notready-why"></span>
+          <button class="btn" id="notready-fix">Open Settings</button>
+        </div>
+
+        <div class="actions">
+          <button class="btn primary" id="record">● Start recording</button>
+          <button class="btn" id="open-folder">Open notes folder</button>
+          <!-- settings.md › Task-specific options: "prefer letting people modify
+               task-specific options without going to your settings area … Putting
+               this type of option in a separate settings area disconnects it from
+               its context". What is being captured is a property of this
+               recording, so it is changed here, beside the meter that shows it.
+               Settings holds the same control and the two stay in step. -->
+          <span class="inline-field">
+            <label for="rec-source">Source</label>
+            <select id="rec-source" class="sel sm" data-setting="CAPTURE_MODE">
+              <option value="both">Mic + system audio</option>
+              <option value="mic">Microphone only</option>
+              <option value="system">System audio only</option>
+            </select>
+          </span>
+        </div>
+
+        <!-- Collapsible. -->
+        <div class="sect">
+          <button class="disclose" aria-expanded="true" aria-controls="transcript">
+            <span class="tri" aria-hidden="true">▶</span> Live transcript
+          </button>
+          <div class="body-in" id="transcript" role="log" aria-live="polite" aria-relevant="additions">
+            <div class="lines" id="lines">
+              <div class="ln hint"><span class="ts"></span><p>Silence is ignored — lines appear when someone speaks.</p></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sect">
+          <button class="disclose" aria-expanded="true" aria-controls="pending">
+            <span class="tri" aria-hidden="true">▶</span> Summarizing
+          </button>
+          <div class="body-in" id="pending">
+            <div class="empty" id="pending-empty">
+              <strong>Notes appear here when a recording stops.</strong>
+              Summarizing runs in the background, so you can start the next meeting straight away.
+            </div>
+            <div class="rowlist" id="rows" hidden></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================ ONE MEETING ======== -->
+      <section class="screen" id="screen-meeting" hidden>
+        <button class="btn back" id="back">← Library</button>
+        <span class="pill warm" id="m-pill">Follow-up ready to draft</span>
+        <h1 class="h" id="m-title">Nexon — pricing review</h1>
+        <div class="meta" id="m-meta">Tuesday 14:02 · Soham, Priya · 32 min · transcribed here</div>
+
+        <!-- Aurora's order: the notes, and underneath them the facts. -->
+        <div class="sect">
+          <button class="disclose" aria-expanded="true" aria-controls="m-summary">
+            <span class="tri" aria-hidden="true">▶</span> Summary
+          </button>
+          <div class="body-in" id="m-summary">
+            <p class="summary-text" id="m-summary-text"></p>
+          </div>
+        </div>
+
+        <div class="sect">
+          <button class="disclose" aria-expanded="true" aria-controls="m-facts">
+            <span class="tri" aria-hidden="true">▶</span> What can be checked
+          </button>
+          <div class="body-in" id="m-facts"></div>
+        </div>
+
+        <div class="sect">
+          <button class="disclose" aria-expanded="true" aria-controls="m-next">
+            <span class="tri" aria-hidden="true">▶</span> Next steps
+          </button>
+          <div class="body-in" id="m-next"></div>
+        </div>
+      </section>
+
+      <!-- ============================================ LIBRARY ============ -->
+      <section class="screen" id="screen-library" hidden>
+        <h1 class="h">Library</h1>
+        <div class="meta">Everything recorded on this machine</div>
+        <!-- What has accumulated here, counted from the files themselves.
+             Every figure is read off disk: nothing is estimated, nothing is a
+             score, and there is no streak to break. It earns its place because
+             the last line is the product's whole claim made at the moment the
+             number is largest -- all of this exists, and none of it was sent
+             anywhere. -->
+        <div class="tally" id="library-tally" hidden>
+          <div class="tally-n"><b id="tally-meetings">0</b><span>meetings</span></div>
+          <div class="tally-n"><b id="tally-notes">0</b><span>with notes</span></div>
+          <div class="tally-n"><b id="tally-size">0</b><span>on this disk</span></div>
+          <div class="tally-claim">0 bytes ever sent</div>
+        </div>
+        <!-- Every other screen says what it will hold once it holds something;
+             this one used to be the exception and simply went blank, which is
+             what a new user sees before their first meeting. -->
+        <div class="empty" id="library-empty" hidden>
+          <strong>Nothing has been recorded yet.</strong>
+          Press Start on the Recording screen. Each meeting is saved here as two
+          plain files — the transcript and the notes — in a folder you can open,
+          copy or delete without this app.
+        </div>
+        <div class="rowlist" id="library-rows"></div>
+      </section>
+
+      <!-- ============================================ ASK ================ -->
+      <!-- Cross-meeting questions. The two rules stated at the top of
+           next_actions/across.py are the two rules of this screen: "Every
+           answer says what it searched" and "Every fact keeps its citation."
+           Both are visible below — the scope line above an answer, and the
+           meeting plus the second on every line of it. -->
+      <section class="screen" id="screen-ask" hidden>
+        <h1 class="h">Ask</h1>
+        <div class="meta">Questions that span meetings</div>
+
+        <!-- What is searchable, stated before anything is asked. Answers read
+             cached packs and never extract, which is why they arrive in
+             milliseconds and why an unindexed meeting is simply absent. -->
+        <div class="strip" id="index-strip">
+          <div class="strip-body">
+            <div class="strip-t" id="index-t">38 of 41 meetings indexed</div>
+            <div class="strip-s" id="index-s">3 have no context pack yet, so nothing in them can be searched or cited.</div>
+          </div>
+          <button class="btn" id="index-btn">Index 3 meetings</button>
+        </div>
+
+        <form class="asker" id="ask-form">
+          <label class="sr" for="q">Your question</label>
+          <input id="q" class="input q" type="text" autocomplete="off"
+                 placeholder="What do I still owe Priya?">
+          <button class="btn primary" type="submit" id="ask-btn">Ask</button>
+        </form>
+
+        <!-- generative-ai.md › Inputs: "offer diverse, predefined example inputs
+             that hint at what's possible for a feature". Each of these is a real
+             function in across.py, not a suggestion shaped like one. -->
+        <div class="chips" id="chips" role="group" aria-label="Example questions">
+          <button class="chip" type="button" data-q="What do I still owe Priya?">What do I still owe…</button>
+          <button class="chip" type="button" data-q="What did we decide about pricing?">What did we decide about…</button>
+          <button class="chip" type="button" data-q="What is still open on the installer?">What's still open on…</button>
+          <button class="chip" type="button" data-q="How did the Linux argument move over six weeks?">How did … move over time</button>
+          <button class="chip" type="button" data-q="Brief me before Northwind.">Brief me before…</button>
+          <button class="chip" type="button" data-q="What has gone stale in the last 14 days?">What's gone stale</button>
+        </div>
+
+        <div id="answer" aria-live="polite">
+          <div class="empty" id="ask-empty">
+            <strong>Nothing has been asked yet.</strong>
+            Answers are assembled from context packs already on this machine. No question
+            leaves it, and no answer is written by a model: every line below one names the
+            meeting and the second it came from.
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================ ASSISTANTS ========= -->
+      <!-- Three questions, in the order people actually ask them: how do I
+           connect one, what will it be able to see, and what has it looked at.
+           The third is the one no config-file integration ever answers, which
+           is why it gets equal room rather than a line in Settings. -->
+      <section class="screen" id="screen-assistants" hidden>
+        <h1 class="h">Assistants</h1>
+        <div class="meta">What a connected assistant may read from this machine</div>
+
+        <div class="sect">
+          <button class="disclose" aria-expanded="true" aria-controls="a-connect">
+            <span class="tri" aria-hidden="true">▶</span> Connect one
+          </button>
+          <div class="body-in" id="a-connect">
+            <div class="rowlist" id="host-rows"></div>
+            <div class="sub">
+              <button class="disclose" aria-expanded="false" aria-controls="a-manual">
+                <span class="tri" aria-hidden="true">▶</span> Something else
+              </button>
+              <div class="body-in" id="a-manual" hidden>
+                <p class="note">Any client that speaks MCP over stdio. Paste this into its
+                  server list — it names this machine's own binary, so nothing is fetched.</p>
+                <pre class="preview" id="mcp-json" tabindex="0"></pre>
+                <div class="actions"><button class="btn" id="copy-json">Copy configuration</button></div>
+                <p class="outcome" id="json-outcome" hidden></p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sect">
+          <button class="disclose" aria-expanded="true" aria-controls="a-scope">
+            <span class="tri" aria-hidden="true">▶</span> What it can see
+          </button>
+          <div class="body-in" id="a-scope">
+            <!-- privacy.md › Best practices: "Give people precise control over
+                 their data by making your permission requests as specific as
+                 possible." A window in days is the precise version of "the
+                 archive". -->
+            <div class="form narrow">
+              <div class="field">
+                <label for="scope-days">Reach back</label>
+                <div class="ctl">
+                  <select id="scope-days" class="sel">
+                    <option value="0" selected>Everything</option>
+                    <option value="7">The last 7 days</option>
+                    <option value="30">The last 30 days</option>
+                    <option value="90">The last 90 days</option>
+                    <option value="180">The last 180 days</option>
+                  </select>
+                  <p class="hint" id="scope-hint"></p>
+                </div>
+              </div>
+            </div>
+            <p class="note">Off by default, deliberately. Unlimited is what every existing
+              install already does, and turning a limit on inside an update would break a
+              working setup to protect someone from a risk they had already accepted.</p>
+
+            <div class="two">
+              <div class="panel">
+                <div class="panel-k">It can read</div>
+                <ul class="ticks">
+                  <li>The notes written for each meeting</li>
+                  <li>Context packs — decisions, actions, open questions, risks</li>
+                  <li>Meeting titles, times and durations</li>
+                </ul>
+              </div>
+              <div class="panel">
+                <div class="panel-k">It can never read</div>
+                <ul class="ticks no">
+                  <li>The audio — it is not kept once a meeting ends</li>
+                  <li>Anything outside the notes folder</li>
+                  <li>A meeting older than the window above</li>
+                </ul>
+              </div>
+            </div>
+            <p class="note">A refused meeting says it was refused. A silent omission would let
+              an assistant answer “you have no commitments” from half an archive.</p>
+          </div>
+        </div>
+
+        <div class="sect">
+          <button class="disclose" aria-expanded="true" aria-controls="a-audit">
+            <span class="tri" aria-hidden="true">▶</span> What it has read
+          </button>
+          <div class="body-in" id="a-audit">
+            <div class="rowlist" id="audit-rows"></div>
+            <div class="empty" id="audit-empty" hidden>
+              <strong>Nothing has been read yet.</strong>
+              Every time a connected assistant opens a meeting, it is written here.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================ SETTINGS =========== -->
+      <section class="screen" id="screen-settings" hidden>
+        <h1 class="h">Settings</h1>
+        <div class="meta">Written to settings.json on this machine</div>
+
+        <!-- feedback.md: feedback belongs in the interface, not in an alert.
+             A setting saves the moment it changes, and says so here. -->
+        <p class="saved" id="saved" hidden></p>
+
+        <div class="sect">
+          <button class="disclose" aria-expanded="true" aria-controls="s-capture">
+            <span class="tri" aria-hidden="true">▶</span> Capture
+          </button>
+          <div class="body-in form" id="s-capture">
+            <div class="field">
+              <label for="set-source">Capture source</label>
+              <div class="ctl">
+                <select id="set-source" class="sel" data-setting="CAPTURE_MODE">
+                  <option value="both">Mic + system audio</option>
+                  <option value="mic">Microphone only</option>
+                  <option value="system">System audio only</option>
+                </select>
+                <p class="hint">Both ends of a call. No bot joins the meeting.</p>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-device">Input device</label>
+              <div class="ctl">
+                <select id="set-device" class="sel" data-setting="INPUT_DEVICE">
+                  <option value="">System default</option>
+                  <option>Microphone Array (Realtek)</option>
+                  <option>Headset (Jabra Evolve2)</option>
+                  <option>BlackHole 2ch</option>
+                </select>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-mic-backend">Recorded by</label>
+              <div class="ctl">
+                <select id="set-mic-backend" class="sel" data-setting="MIC_BACKEND">
+                  <option value="auto">Automatic</option>
+                  <option value="sounddevice">sounddevice</option>
+                  <option value="soundcard">soundcard</option>
+                </select>
+                <!-- config.py carries the incident this exists for: one
+                     backend distorted a user's voice for the other people on a
+                     Teams call, reproducibly. Leave it on Automatic unless
+                     that is happening to you. -->
+                <p class="note">Which library takes the microphone. Change it only if
+                  other people say your voice sounds wrong on a call.</p>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-vad">Voice detection</label>
+              <div class="ctl">
+                <select id="set-vad" class="sel" data-setting="VAD_ENGINE">
+                  <option value="silero">Silero — a model of speech</option>
+                  <option value="webrtc">WebRTC — cheaper, no model</option>
+                </select>
+                <p class="hint">WebRTC calls most music and café noise speech, so an utterance
+                  never ends. It is a fallback, not a choice.</p>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-thresh">Sensitivity</label>
+              <div class="ctl">
+                <span class="slider">
+                  <input id="set-thresh" type="range" min="0" max="1" step="0.05" value="0.5"
+                         data-setting="VAD_THRESHOLD">
+                  <output for="set-thresh" id="thresh-out">0.50</output>
+                </span>
+                <p class="hint">Lower hears more, and admits more noise. 0.50 measured best.</p>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-silence">End an utterance after</label>
+              <div class="ctl">
+                <span class="suffixed">
+                  <input id="set-silence" class="input num" type="number" min="200" max="5000"
+                         step="100" value="800" data-setting="SILENCE_TIMEOUT_MS">
+                  <span class="suffix">ms of silence</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sect">
+          <button class="disclose" aria-expanded="true" aria-controls="s-lang">
+            <span class="tri" aria-hidden="true">▶</span> Language
+          </button>
+          <div class="body-in form" id="s-lang">
+            <div class="field">
+              <label for="set-spoken">Spoken language</label>
+              <div class="ctl">
+                <select id="set-spoken" class="sel" data-setting="WHISPER_LANGUAGE">
+                  <option value="">Detect it</option>
+                  <option value="en" selected>English</option>
+                  <option value="hi">Hindi</option>
+                  <option value="de">German</option>
+                  <option value="fr">French</option>
+                  <option value="es">Spanish</option>
+                  <option value="ja">Japanese</option>
+                </select>
+                <p class="hint">Naming it beats detection on a short meeting.</p>
+              </div>
+            </div>
+            <!-- toggles.md › Radio buttons: "In rare cases where a single
+                 checkbox doesn't clearly communicate the opposing states, you
+                 can use a pair of radio buttons, each with a label that
+                 specifies the state it controls." Translate is not not-transcribe. -->
+            <div class="field">
+              <span class="label-as-text" id="task-label">Whisper writes</span>
+              <div class="ctl radiogroup" role="radiogroup" aria-labelledby="task-label">
+                <label class="radio"><input type="radio" name="task" value="transcribe" checked
+                  data-setting="WHISPER_TASK"><span>What was said, in the language it was said in</span></label>
+                <label class="radio"><input type="radio" name="task" value="translate"
+                  data-setting="WHISPER_TASK"><span>An English translation of it</span></label>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-notes-lang">Notes language</label>
+              <div class="ctl">
+                <select id="set-notes-lang" class="sel" data-setting="NOTES_LANGUAGE">
+                  <option value="en" selected>English</option>
+                  <option value="hi">Hindi</option>
+                  <option value="de">German</option>
+                  <option value="fr">French</option>
+                  <option value="es">Spanish</option>
+                </select>
+                <p class="hint">The notes can be written in a language the meeting was not held in.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sect">
+          <button class="disclose" aria-expanded="true" aria-controls="s-notes">
+            <span class="tri" aria-hidden="true">▶</span> Summaries
+          </button>
+          <div class="body-in form" id="s-notes">
+            <div class="field">
+              <label for="set-engine">Written by</label>
+              <div class="ctl">
+                <select id="set-engine" class="sel" data-setting="SUMMARY_ENGINE">
+                  <option value="ollama" selected>Ollama</option>
+                  <option value="ctranslate2">CTranslate2 — in this process</option>
+                  <option value="custom">Something else…</option>
+                </select>
+                <p class="hint" id="engine-hint">Ollama manages its own models. Nothing is downloaded here.</p>
+              </div>
+            </div>
+            <div class="field" id="model-field">
+              <label for="set-model">Model</label>
+              <div class="ctl">
+                <input id="set-model" class="input mono" type="text" value="llama3.2"
+                       placeholder="llama3.2" data-setting="OLLAMA_MODEL" spellcheck="false">
+                <p class="hint" id="model-hint">Any model the engine above already has. Pull it first.</p>
+              </div>
+            </div>
+            <p class="note">Notes are written one at a time. Two local model calls at once
+              makes both slow rather than either fast.</p>
+          </div>
+        </div>
+
+        <div class="sect">
+          <button class="disclose" aria-expanded="true" aria-controls="s-machine">
+            <span class="tri" aria-hidden="true">▶</span> Transcription model
+          </button>
+          <div class="body-in form" id="s-machine">
+            <div class="field">
+              <label for="set-whisper">Size</label>
+              <div class="ctl">
+                <select id="set-whisper" class="sel" data-setting="WHISPER_MODEL">
+                  <option value="tiny" selected>tiny — fastest</option>
+                  <option value="base">base — pinned revision</option>
+                  <option value="small">small — best transcript</option>
+                </select>
+                <p class="hint">Larger is better when nothing else needs the machine.</p>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-beam">Search width</label>
+              <div class="ctl">
+                <select id="set-beam" class="sel" data-setting="WHISPER_BEAM_SIZE">
+                  <option value="1">1 — greedy, markedly faster</option>
+                  <option value="5">5 — best transcript, 2–3× the CPU</option>
+                </select>
+                <p class="hint">On short meeting utterances greedy is barely less
+                  accurate, which is why it is the default.</p>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-partial-ms">Provisional text every</label>
+              <div class="ctl">
+                <span class="suffixed">
+                  <input id="set-partial-ms" class="input num" type="number" min="200"
+                         max="5000" step="100" value="500" data-setting="PARTIAL_INTERVAL_MS">
+                  <span class="suffix">ms — a floor, not a promise</span>
+                </span>
+                <!-- Provisional work is skipped whenever a finished utterance is
+                     waiting, so on a slow machine this stretches rather than
+                     stealing the model from the transcript that gets saved. -->
+                <p class="hint">The grey text that appears before a sentence is final.
+                  It never delays the saved transcript.</p>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-partial-model">Provisional text uses</label>
+              <div class="ctl">
+                <input id="set-partial-model" class="input wide" type="text"
+                       placeholder="empty — the model above" spellcheck="false"
+                       data-setting="PARTIAL_MODEL">
+                <p class="hint">A smaller model refreshes the guess about twice as often,
+                  at ~66 MB and one more download on first run. Empty is the default
+                  because the product should work offline the moment it is installed.</p>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-device-c">Runs on</label>
+              <div class="ctl">
+                <select id="set-device-c" class="sel" data-setting="WHISPER_DEVICE">
+                  <option value="cpu" selected>CPU</option>
+                  <option value="cuda">CUDA</option>
+                </select>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-compute">Precision</label>
+              <div class="ctl">
+                <select id="set-compute" class="sel" data-setting="WHISPER_COMPUTE">
+                  <option value="int8" selected>int8 — fast on CPU</option>
+                  <option value="float16">float16 — needs a GPU</option>
+                </select>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-threads">CPU threads</label>
+              <div class="ctl">
+                <span class="suffixed">
+                  <input id="set-threads" class="input num" type="number" min="0" max="64"
+                         value="0" data-setting="WHISPER_CPU_THREADS">
+                  <span class="suffix">0 = as many as there are</span>
+                </span>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-release">Free the model when idle</label>
+              <div class="ctl">
+                <label class="sw"><input id="set-release" type="checkbox" checked
+                  data-setting="RELEASE_MODEL_WHEN_IDLE"><i></i></label>
+                <p class="hint">Gives the RAM back between meetings, and pays to load it again.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sect">
+          <button class="disclose" aria-expanded="true" aria-controls="s-deliver">
+            <span class="tri" aria-hidden="true">▶</span> Delivery
+          </button>
+          <div class="body-in form" id="s-deliver">
+            <!-- toggles.md › Switches: "you might use a switch to let people turn
+                 on or off a group of settings, instead of just one setting." The
+                 three under it are checkboxes because, per the same page, "the
+                 visual style of checkboxes helps them align well and communicate
+                 grouping". -->
+            <div class="field">
+              <label for="set-deliver">Send the notes when a meeting ends</label>
+              <div class="ctl">
+                <label class="sw"><input id="set-deliver" type="checkbox"><i></i></label>
+                <p class="hint">Everything under this needs the network.</p>
+              </div>
+            </div>
+            <div class="field sub-field" id="deliver-group">
+              <span class="label-as-text">Which means</span>
+              <div class="ctl checks">
+                <label class="check"><input type="checkbox" checked data-setting="EMAIL_SUMMARY_TO_SELF"><span>Email them to me</span></label>
+                <label class="check"><input type="checkbox" data-setting="EMAIL_SUMMARY_TO_ATTENDEES"><span>Email them to everyone who was invited</span></label>
+                <label class="check"><input type="checkbox" data-setting="POST_NOTES_TO_EVENT"><span>Post them on the calendar event</span></label>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-cal">Calendar</label>
+              <div class="ctl">
+                <select id="set-cal" class="sel" data-setting="CALENDAR_PROVIDER">
+                  <option value="">Not connected</option>
+                  <option value="microsoft">Microsoft 365</option>
+                  <option value="google">Google Calendar</option>
+                </select>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-autostart">Start when a meeting starts</label>
+              <div class="ctl">
+                <label class="sw"><input id="set-autostart" type="checkbox"
+                  data-setting="AUTO_START_FROM_CALENDAR"><i></i></label>
+                <p class="hint">The scheduler reads a local copy. It never reaches the network itself.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sect">
+          <button class="disclose" aria-expanded="true" aria-controls="s-keys">
+            <span class="tri" aria-hidden="true">▶</span> Shortcut
+          </button>
+          <div class="body-in form" id="s-keys">
+            <div class="field">
+              <label for="set-hotkey-on">System-wide record key</label>
+              <div class="ctl">
+                <label class="sw"><input id="set-hotkey-on" type="checkbox" checked
+                  data-setting="HOTKEY_ENABLED"><i></i></label>
+              </div>
+            </div>
+            <div class="field" id="hotkey-field">
+              <label for="set-hotkey">The chord</label>
+              <div class="ctl">
+                <input id="set-hotkey" class="input mono" type="text" value="ctrl+shift+space"
+                       data-setting="HOTKEY" spellcheck="false">
+                <p class="hint">Taken from every other application on the machine, so pick one
+                  nothing else wants.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sect">
+          <button class="disclose" aria-expanded="true" aria-controls="s-privacy">
+            <span class="tri" aria-hidden="true">▶</span> Privacy
+          </button>
+          <div class="body-in form" id="s-privacy">
+            <div class="field">
+              <label for="set-sealed">Sealed mode</label>
+              <div class="ctl">
+                <label class="sw"><input id="set-sealed" type="checkbox" data-setting="SEALED_MODE"><i></i></label>
+                <p class="hint">Refuse every outbound connection, whatever else is set.
+                  An administrator turning this on across a fleet is the whole point of it.</p>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-out">Notes folder</label>
+              <div class="ctl">
+                <span class="withbtn">
+                  <input id="set-out" class="input mono" type="text" value="notes"
+                         data-setting="OUTPUT_DIR" spellcheck="false">
+                  <button class="btn" type="button" id="choose-out">Choose…</button>
+                </span>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-remind">Check for a new version</label>
+              <div class="ctl">
+                <select id="set-remind" class="sel" data-setting="UPDATE_REMINDER_DAYS">
+                  <option value="0">Never</option>
+                  <option value="7" selected>Weekly</option>
+                  <option value="30">Monthly</option>
+                </select>
+                <p class="hint">A reminder, computed from the date on this machine. Nothing is fetched.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Collapsed. These import and run code the user names — no more
+             privileged than config.py was, same user and same machine, but
+             worth being explicit about. -->
+        <div class="sect">
+          <button class="disclose" aria-expanded="false" aria-controls="s-adv">
+            <span class="tri" aria-hidden="true">▶</span> Advanced
+          </button>
+          <div class="body-in form" id="s-adv" hidden>
+            <p class="note warn">The two fields below name a Python class this app will import
+              and run. Point them at code you wrote or trust.</p>
+            <div class="field">
+              <label for="set-ct">Speech engine</label>
+              <div class="ctl">
+                <input id="set-ct" class="input mono" type="text" placeholder="module:ClassName"
+                       data-setting="CUSTOM_TRANSCRIBER" spellcheck="false">
+                <p class="hint">Empty means faster-whisper.</p>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-cs">Notes engine</label>
+              <div class="ctl">
+                <input id="set-cs" class="input mono" type="text" placeholder="module:ClassName"
+                       data-setting="CUSTOM_SUMMARIZER" spellcheck="false">
+                <p class="hint">Empty means the engine chosen under Summaries.</p>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-notes-model">Notes model weights</label>
+              <div class="ctl">
+                <input id="set-notes-model" class="input mono wide" type="text"
+                       placeholder="a .gguf file, or a converted model folder"
+                       data-setting="NOTES_MODEL" spellcheck="false">
+                <!-- Only read by the engines that run a model in this process
+                     (ctranslate2, llamacpp). Ollama manages its own weights and
+                     ignores this entirely. -->
+                <p class="hint">Only for an engine that runs the model in this process.
+                  Ollama ignores it.</p>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-url">Ollama server</label>
+              <div class="ctl">
+                <input id="set-url" class="input mono" type="text" value="http://localhost:11434"
+                       data-setting="OLLAMA_URL" spellcheck="false">
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-ctx">Context window</label>
+              <div class="ctl">
+                <span class="suffixed">
+                  <input id="set-ctx" class="input num wide" type="number" min="2048" max="131072"
+                         step="1024" value="16384" data-setting="OLLAMA_NUM_CTX">
+                  <span class="suffix">tokens · more needs more RAM</span>
+                </span>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-chunk">Split a long meeting every</label>
+              <div class="ctl">
+                <span class="suffixed">
+                  <input id="set-chunk" class="input num" type="number" min="200" max="4000"
+                         step="100" value="800" data-setting="NOTES_CHUNK_WORDS">
+                  <span class="suffix">words</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================================== THIS MACHINE ============= -->
+        <!-- Parity with the tkinter Settings tab. These are actions rather
+             than settings, which is why they sit apart from everything above:
+             nothing here is saved, each one does something now and says what
+             happened. Every handler calls a Core module, so this window and
+             the old one cannot disagree about the machine they are on. -->
+        <div class="grp">
+          <h2 class="grp-h">This machine</h2>
+          <div class="fields">
+
+            <div class="field">
+              <label>Version</label>
+              <div class="ctl act">
+                <span class="val" id="mach-version">—</span>
+                <button class="btn" id="mach-update">Check for updates</button>
+                <!-- The only button in this window that opens a socket. It
+                     says so, because an app whose pill reads "0 bytes out"
+                     should never surprise anyone with a request. -->
+                <span class="note">Reaches the network. Only when you press it.</span>
+              </div>
+            </div>
+
+            <div class="field">
+              <label>Notes engine</label>
+              <div class="ctl act">
+                <span class="val" id="mach-engine">—</span>
+                <button class="btn" id="mach-engine-check">Re-check</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <label>Performance</label>
+              <div class="ctl act">
+                <span class="val" id="mach-perf">—</span>
+                <button class="btn" id="mach-bench">Benchmark this machine</button>
+                <span class="note">Transcribes ten seconds of speech. Takes a moment.</span>
+              </div>
+            </div>
+
+            <div class="field">
+              <label>Folders</label>
+              <div class="ctl act">
+                <button class="btn" id="mach-notes-folder">Open notes folder</button>
+                <button class="btn" id="mach-config-folder">Open config folder</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <label>Help</label>
+              <div class="ctl act">
+                <button class="btn" id="mach-guide">Setup guide</button>
+                <button class="btn" id="mach-support">Support page</button>
+                <button class="btn" id="mach-report">Save a problem report</button>
+                <span class="note">The report is redacted before it is written.</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -903,49 +903,25 @@ class Wizard:
         return out
 
     def _save(self):
-        """Write the choices. A failure here must not trap the user."""
-        changes = {}
-        notes = self._notes_choice()
-        if notes:
-            # The default is stored as the plain name config.py ships, not as
-            # an absolute path: a profile that moves between machines (or a
-            # user whose account is renamed) should follow the data folder
-            # rather than point at a path that no longer exists.
-            changes["OUTPUT_DIR"] = ("notes"
-                                     if notes == os.path.normpath(default_notes_dir())
-                                     else notes)
-        code = self._language_code()
-        if code:
-            # normalize() turns the "auto" the picker speaks into the None the
-            # transcriber wants.
-            changes["WHISPER_LANGUAGE"] = languages.normalize(code)
+        """Write the choices. A failure here must not trap the user.
+
+        The mapping itself is :func:`plan`, shared with the Aurora window, so
+        the two cannot answer the same five questions differently. This method
+        only reads widgets.
+        """
         custom = getattr(self, "custom_model", None)
-        custom = custom.get().strip() if custom else ""
-        if custom:
-            changes["WHISPER_MODEL"] = custom
-        elif getattr(self, "profile", None):
-            spec = performance.PROFILES[self.profile.get()]
-            changes["WHISPER_MODEL"] = spec["WHISPER_MODEL"]
-            changes["WHISPER_BEAM_SIZE"] = spec["WHISPER_BEAM_SIZE"]
-            changes["WHISPER_COMPUTE"] = spec["WHISPER_COMPUTE"]
-        import notes_model
-
-        kind = self.choices.get("notes_kind", "")
-        if kind == "builtin":
-            changes["SUMMARY_ENGINE"] = notes_model.DEFAULT.engine
-        elif kind == "ollama":
-            changes["SUMMARY_ENGINE"] = "ollama"
-        # "skip" writes no engine at all: the shipped default already produces
-        # no summary without a model, and recording a choice the user declined
-        # to make would be putting words in their mouth.
-
         llm = getattr(self, "llm", None)
-        if kind != "builtin" and llm and llm.get().strip():
-            changes["OLLAMA_MODEL"] = llm.get().strip()
         url = getattr(self, "url", None)
-        if url and url.get().strip():
-            changes["OLLAMA_URL"] = url.get().strip()
-
+        profile = getattr(self, "profile", None)
+        changes = plan({
+            "notes_dir": self._notes_choice(),
+            "language": self._language_code(),
+            "custom_model": custom.get().strip() if custom else "",
+            "profile": profile.get() if profile else "",
+            "notes_kind": self.choices.get("notes_kind", ""),
+            "ollama_model": llm.get().strip() if llm else "",
+            "ollama_url": url.get().strip() if url else "",
+        })
         if not changes:
             return
         try:
@@ -974,6 +950,107 @@ class Wizard:
         else:
             self.root.wait_window()
         return self.completed
+
+
+# --- Headless: the same questions, asked by a different window -------------
+#
+# The Aurora window asks these five questions too, and it must not answer them
+# differently. So the mapping from "what the person chose" to "what gets
+# written" lives here, once, and both windows use it. The tkinter class above
+# reads its Tk variables and hands the result to :func:`plan`; the HTML one
+# collects the same keys in JavaScript and hands them to :func:`commit`.
+#
+# Nothing below this line imports tkinter, so setup still works in a build
+# where Tk is missing -- which is the same build Aurora exists for.
+
+
+def options() -> dict:
+    """Everything a front end needs to draw the five steps.
+
+    Pure data, no widgets. The defaults are the ones the tkinter wizard starts
+    from, so both windows open on the same answers.
+    """
+    import notes_model
+
+    spec = notes_model.DEFAULT
+    return {
+        "notes_dir": default_notes_dir(),
+        "languages": [{"code": code, "label": label}
+                      for code, label in languages.choices()],
+        "language_default": DEFAULT_LANGUAGE,
+        "profiles": [dict(key=key, **{k: performance.PROFILES[key][k] for k in
+                                      ("label", "summary", "ram_mb", "accuracy",
+                                       "WHISPER_MODEL")})
+                     for key in ("light", "balanced", "accurate")],
+        "profile_default": performance.DEFAULT,
+        "builtin": {"size_mb": spec.size_mb, "engine": spec.engine},
+        "ollama_url": getattr(config, "OLLAMA_URL", ""),
+        "ollama_model": getattr(config, "OLLAMA_MODEL", DEFAULT_LLM),
+    }
+
+
+def plan(choices: dict) -> dict:
+    """Choices in, settings out. Decides only -- writes nothing.
+
+    Optional keys: ``notes_dir``, ``language`` (a code, or the auto value),
+    ``profile``, ``custom_model``, ``notes_kind`` ("builtin" | "ollama" |
+    "skip"), ``ollama_url``, ``ollama_model``.
+    """
+    import notes_model
+
+    changes = {}
+    notes = (choices.get("notes_dir") or "").strip()
+    if notes:
+        notes = os.path.normpath(notes)
+        # Stored as the plain name config.py ships when it is the default,
+        # rather than an absolute path: a profile that moves between machines
+        # should follow the data folder, not point somewhere that is gone.
+        changes["OUTPUT_DIR"] = ("notes"
+                                 if notes == os.path.normpath(default_notes_dir())
+                                 else notes)
+
+    code = (choices.get("language") or "").strip()
+    if code:
+        changes["WHISPER_LANGUAGE"] = languages.normalize(code)
+
+    custom = (choices.get("custom_model") or "").strip()
+    if custom:
+        changes["WHISPER_MODEL"] = custom
+    elif choices.get("profile") in performance.PROFILES:
+        spec = performance.PROFILES[choices["profile"]]
+        changes["WHISPER_MODEL"] = spec["WHISPER_MODEL"]
+        changes["WHISPER_BEAM_SIZE"] = spec["WHISPER_BEAM_SIZE"]
+        changes["WHISPER_COMPUTE"] = spec["WHISPER_COMPUTE"]
+
+    kind = choices.get("notes_kind", "")
+    if kind == "builtin":
+        changes["SUMMARY_ENGINE"] = notes_model.DEFAULT.engine
+    elif kind == "ollama":
+        changes["SUMMARY_ENGINE"] = "ollama"
+    # "skip" writes no engine at all: the shipped default already produces no
+    # summary without a model, and recording a choice the user declined to make
+    # would be putting words in their mouth.
+
+    llm = (choices.get("ollama_model") or "").strip()
+    if kind != "builtin" and llm:
+        changes["OLLAMA_MODEL"] = llm
+    url = (choices.get("ollama_url") or "").strip()
+    if url:
+        changes["OLLAMA_URL"] = url
+    return changes
+
+
+def commit(choices: dict) -> dict:
+    """Decide, then write. Returns what was saved. Never raises."""
+    changes = plan(choices)
+    if not changes:
+        return {}
+    try:
+        settings.save(**changes)
+    except Exception as e:  # noqa: BLE001
+        print(f"[setup] could not save settings: {e}", flush=True)
+        return {}
+    return changes
 
 
 # ---------------------------------------------------------------------------

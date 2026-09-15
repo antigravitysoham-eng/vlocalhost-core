@@ -1,0 +1,629 @@
+/* Vlocalhost — Aurora, as an application rather than a mockup. */
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font: var(--t-body);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+:focus-visible { outline: 2px solid var(--amber-text); outline-offset: 2px; border-radius: 8px; }
+:focus:not(:focus-visible) { outline: none; }
+
+.sr {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ------------------------------------------------------------- the aurora */
+/* Decorative light behind everything. It is a background wash, not a material
+ * over content — materials.md forbids glass in the content layer, and this
+ * sits beneath it. Increase Contrast turns it off via --glow. */
+.sky { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.sky b {
+  position: absolute; border-radius: 50%; filter: blur(90px);
+  display: block; opacity: var(--glow);
+}
+.sky b:nth-child(1) { width: 640px; height: 640px; left: -180px; top: -260px;
+  background: radial-gradient(circle, rgba(255,180,61,.55), transparent 65%); }
+.sky b:nth-child(2) { width: 720px; height: 720px; right: -240px; top: 60px;
+  background: radial-gradient(circle, rgba(139,124,240,.42), transparent 65%); }
+.sky b:nth-child(3) { width: 560px; height: 560px; left: 34%; bottom: -240px;
+  background: radial-gradient(circle, rgba(56,225,206,.34), transparent 65%); }
+
+/* --------------------------------------------------------------- the shell */
+.app { position: relative; z-index: 1; height: 100vh; display: flex; flex-direction: column; }
+
+.chrome {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--paper-2) 72%, transparent);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  backdrop-filter: blur(12px) saturate(160%);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .chrome { background: var(--paper-2); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+.chrome .t {
+  font: var(--t-label); letter-spacing: var(--track);
+  text-transform: uppercase; color: var(--ink-4);
+}
+
+.shell { flex: 1; display: grid; grid-template-columns: 212px minmax(0, 1fr); min-height: 0; }
+
+/* ------------------------------------------------------------------- nav */
+.nav {
+  border-right: 1px solid var(--line);
+  padding: var(--s5) var(--s3);
+  display: flex; flex-direction: column; gap: 2px;
+  overflow-y: auto;
+}
+.nav .g {
+  font: var(--t-label); letter-spacing: var(--track); text-transform: uppercase;
+  color: var(--ink-4); padding: 0 var(--s3); margin: var(--s4) 0 var(--s2);
+}
+.nav .g:first-child { margin-top: 0; }
+.nav button {
+  display: flex; align-items: center; gap: 11px;
+  width: 100%; min-height: var(--hit); padding: 9px var(--s3);
+  border: 0; border-radius: var(--r-sm); background: none;
+  color: var(--ink-2); font: var(--t-body); font-weight: 500;
+  text-align: left; cursor: pointer;
+}
+.nav button:hover { background: color-mix(in srgb, var(--wash) 70%, transparent); }
+.nav button .dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--line-2);
+  display: block; flex: none;
+}
+.nav button[aria-current="page"] {
+  background: var(--paper-2); color: var(--ink); box-shadow: var(--shadow); font-weight: 600;
+}
+.nav button[aria-current="page"] .dot {
+  background: var(--amber-l); box-shadow: 0 0 0 4px var(--amber-soft);
+}
+
+/* The on-device badge. Nothing else in the app may use mint. */
+.nav .foot {
+  margin-top: auto; padding: var(--s3);
+  border-radius: 14px; background: var(--mint-soft);
+  font: var(--t-label); letter-spacing: .08em; color: var(--mint-on-soft);
+  display: flex; align-items: center; gap: var(--s2);
+}
+.nav .foot b {
+  width: 7px; height: 7px; border-radius: 50%; background: currentColor;
+  display: block; flex: none; animation: blip 2.4s ease-in-out infinite;
+}
+@keyframes blip { 0%, 100% { opacity: 1; transform: scale(1) } 50% { opacity: .4; transform: scale(.8) } }
+@media (prefers-reduced-motion: reduce) { .nav .foot b, .pill.live b { animation: none } }
+
+/* ------------------------------------------------------------------ body */
+.body { padding: var(--s6) var(--s6) var(--s5); overflow-y: auto; min-height: 0; }
+/* A measure, not the whole window. Prose set to 1500px is unreadable however
+   good the type is (typography.md: line length is part of legibility). */
+.screen { max-width: 1080px; }
+.screen[hidden] { display: none; }
+
+.pill {
+  display: inline-flex; align-items: center; gap: var(--s2);
+  border-radius: 999px; padding: 7px 14px;
+  font: var(--t-label); letter-spacing: .1em; text-transform: uppercase;
+}
+.pill.live { background: var(--mint-soft); color: var(--mint-on-soft); }
+.pill.live b {
+  width: 7px; height: 7px; border-radius: 50%; background: currentColor;
+  display: block; animation: blip 2.4s ease-in-out infinite;
+}
+.pill.warm { background: var(--amber-soft); color: var(--amber-on-soft); }
+
+.h { font: var(--t-h); letter-spacing: -.035em; margin: var(--s3) 0 var(--s1); }
+.meta {
+  font: var(--t-data); color: var(--ink-4); letter-spacing: .05em;
+  text-transform: uppercase; font-variant-numeric: tabular-nums;
+}
+
+/* -------------------------------------------------------------- the meter */
+/* "The live meter is the page." It is the one piece of boldness, so
+ * everything around it stays quiet. */
+/* Tall while the mic is open, short while it is not. Holding the full 92px at
+   idle left a blank the height of a paragraph above a row of grey stubs, which
+   reads as a rendering fault rather than as silence. */
+.wave { display: flex; align-items: flex-end; justify-content: space-between;
+        gap: 4px; height: 92px; margin: var(--s5) 0 var(--s2);
+        transition: height .2s ease; }
+.wave.idle { height: 26px; }
+@media (prefers-reduced-motion: reduce) { .wave { transition: none } }
+/* Slim capsules, spread across the width. Left to flex:1 alone they grow to
+   ~50px each on a wide window and stop reading as a level meter at all. */
+.wave i {
+  flex: 1 1 0; max-width: 13px; border-radius: 999px; display: block; min-height: 4px;
+  background: linear-gradient(180deg, var(--amber-l), rgba(255, 180, 61, .35));
+  transition: height .12s linear;
+}
+.wave i.q { background: var(--line-2); }
+@media (prefers-reduced-motion: reduce) { .wave i { transition: none } }
+
+.scale {
+  display: flex; justify-content: space-between; gap: var(--s3);
+  font: var(--t-label); color: var(--ink-4); letter-spacing: .1em;
+  padding-top: var(--s3); border-top: 1px solid var(--line);
+}
+
+/* --------------------------------------------------------- disclosure rows */
+/* disclosure-controls.md: the triangle points inward when the content is
+ * hidden and down when it is visible, and the label says what is disclosed. */
+.disclose {
+  display: inline-flex; align-items: center; gap: var(--s2);
+  min-height: var(--hit); padding: 0; border: 0; background: none; cursor: pointer;
+  font: var(--t-label); letter-spacing: var(--track); text-transform: uppercase;
+  color: var(--ink-4);
+}
+.disclose:hover { color: var(--ink); }
+.disclose[aria-expanded="false"] { color: var(--amber-text); }
+.disclose .tri { display: inline-block; width: 9px; flex: none; transition: transform .16s ease; transform: rotate(90deg); }
+.disclose[aria-expanded="false"] .tri { transform: rotate(0); }
+@media (prefers-reduced-motion: reduce) { .disclose .tri { transition: none } }
+
+.sect { margin-top: var(--s5); }
+.sect > .body-in { padding-top: var(--s3); }
+
+/* ------------------------------------------------------------- transcript */
+.lines { display: flex; flex-direction: column; gap: var(--s3); }
+.ln { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: var(--s3); align-items: baseline; }
+.ln .ts { font: var(--t-data); color: var(--ink-4); font-variant-numeric: tabular-nums; }
+.ln p { margin: 0; color: var(--ink-2); font: var(--t-body); }
+.ln .who { font-weight: 600; color: var(--ink); }
+.ln.fresh p { color: var(--ink); }
+/* Provisional words. Dimmed AND italic, so "not final yet" survives greyscale
+ * — never colour on its own (accessibility.md). */
+.ln.interim p { color: var(--ink-4); font-style: italic; }
+.ln.hint p { color: var(--ink-4); font-style: italic; }
+
+/* ------------------------------------------------------------------ facts */
+/* Aurora's signature: a hairline rule, the role, the claim, the second it was
+ * said. "Every line carries the second it came from. That timestamp is the
+ * product." */
+.fact { border-left: 2px solid var(--amber); padding: var(--s1) 0 var(--s1) var(--s4); margin-top: var(--s5); }
+.fact .k { font: var(--t-label); letter-spacing: var(--track); text-transform: uppercase; color: var(--ink-4); }
+/* The citation sits with the sentence, not at the far edge of the row. Pushed
+   right it stops reading as "this claim, at this second" and starts reading as
+   a column of times nobody can pair up. */
+.fact .v { font: var(--t-prose); color: var(--ink); margin-top: 5px; max-width: 64ch; }
+.fact .cite { font: var(--t-data); color: var(--amber-text); font-variant-numeric: tabular-nums;
+              margin-left: var(--s2); white-space: nowrap; }
+.fact.risk { border-left-color: var(--risk); }
+.fact.risk .cite { color: var(--risk-text); }
+.fact .who { font: var(--t-data); color: var(--mint-on-soft); margin-top: 3px; }
+
+.fact.owed .v { display: flex; gap: var(--s2); align-items: flex-start; }
+.fact.owed .v .body-text { flex: 1; min-width: 0; }
+.fact.owed input[type=checkbox] {
+  width: 16px; height: 16px; margin: 4px 0 0; flex: none;
+  accent-color: var(--amber); cursor: pointer;
+}
+
+.summary-text { font: var(--t-prose); color: var(--ink-2); max-width: 62ch; margin: var(--s5) 0 0; }
+
+/* ------------------------------------------------------------- meeting rows */
+.rowlist {
+  margin-top: var(--s3); border: 1px solid var(--line); border-radius: var(--r-md);
+  overflow: hidden; background: var(--paper-2); box-shadow: var(--shadow);
+}
+.r {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s4);
+  padding: 15px var(--s5); border-bottom: 1px solid var(--line); align-items: center;
+  width: 100%; border-left: 0; border-right: 0; border-top: 0;
+  background: none; text-align: left; font: inherit; color: inherit; cursor: pointer;
+}
+.r:last-child { border-bottom: 0; }
+.r:hover { background: color-mix(in srgb, var(--wash) 60%, transparent); }
+.r.on { background: linear-gradient(90deg, var(--amber-soft), transparent); }
+.r .t { font: var(--t-title); }
+.r .s { color: var(--ink-3); font: var(--t-body); margin-top: 2px; display: flex; align-items: center; gap: var(--s2); }
+.r .when { font: var(--t-data); color: var(--ink-4); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.r .spin { display: inline-block; animation: spin 1.4s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg) } }
+@media (prefers-reduced-motion: reduce) { .r .spin { animation: none } }
+.r .s.working { color: var(--amber-text); }
+.r .s.ready   { color: var(--mint-on-soft); }
+.r .s.failed  { color: var(--risk-text); }
+/* Saved, but not finished. Neither the mint of a completed meeting nor
+   the red of a failure — the words are safe, the notes are not there. */
+.r .s.partial { color: var(--amber-text); }
+
+/* ---------------------------------------------------------------- buttons */
+.btn {
+  font: var(--t-body); font-weight: 500; min-height: var(--hit); padding: 0 var(--s4);
+  border: 1px solid var(--line-2); border-radius: 999px;
+  background: var(--paper-2); color: var(--ink); cursor: pointer;
+}
+.btn:hover { border-color: var(--ink-4); }
+.btn[disabled] { opacity: .45; cursor: default; }
+.btn.primary {
+  background: linear-gradient(90deg, var(--amber), var(--amber-l));
+  color: #1A1206; border-color: transparent; font-weight: 600; padding: 0 var(--s5);
+}
+.btn.stop { background: var(--risk-text); color: #fff; border-color: transparent; font-weight: 600; padding: 0 var(--s5); }
+.actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s4); }
+
+/* A setting that belongs to the task rather than to Settings, sitting in the
+   action row it affects. The label is quiet: the control is the point, and the
+   two buttons beside it must stay louder than a source picker. */
+.inline-field { display: inline-flex; align-items: center; gap: var(--s2); margin-left: var(--s2); }
+.inline-field label { font: var(--t-hint); color: var(--ink-3); }
+
+.preview {
+  margin-top: var(--s3); background: var(--wash);
+  border: 1px solid var(--line); border-radius: var(--r-sm); padding: var(--s4);
+  font: var(--t-data); line-height: 1.7; max-height: 200px; overflow: auto; white-space: pre-wrap;
+}
+.outcome { font: var(--t-body); color: var(--mint-on-soft); margin: var(--s3) 0 0; }
+.outcome.bad { color: var(--risk-text); }
+
+/* ----------------------------------------------------------- empty states */
+/* writing.md: an empty screen invites the next action. */
+.empty { color: var(--ink-3); max-width: 48ch; margin-top: var(--s4); }
+.empty strong { display: block; color: var(--ink); font-weight: 600; margin-bottom: var(--s2); }
+
+.back { margin-bottom: var(--s3); }
+
+/* A paragraph that explains the thing above it rather than labelling it. */
+.note { font: var(--t-hint); color: var(--ink-3); max-width: 62ch; margin: var(--s4) 0 0; }
+.note.warn {
+  border-left: 2px solid var(--amber); padding: var(--s2) 0 var(--s2) var(--s4);
+  color: var(--ink-2);
+}
+.sub { margin-top: var(--s5); }
+
+/* ====================================================== FORM CONTROLS ==== */
+/* One grid for a whole group, not one per row, so every label in a group
+ * shares an edge. Trailing-aligned labels are the desktop settings
+ * convention; the control column is where the eye runs down.
+ *
+ * `.field { display: contents }` is what lets a two-element row participate
+ * in the group's grid instead of making its own.
+ */
+.form {
+  display: grid; grid-template-columns: 200px minmax(0, 1fr);
+  column-gap: var(--s4); row-gap: var(--s4);
+  align-items: start; max-width: 760px;
+}
+/* A form of one field does not need a 200px label column; the label only has
+   to reach the control. */
+.form.narrow { max-width: 560px; grid-template-columns: 110px minmax(0, 1fr); }
+.field { display: contents; }
+.field > label,
+.field > .label-as-text {
+  text-align: right; padding-top: 4px;
+  font: var(--t-body); font-weight: 500; color: var(--ink-2);
+}
+.field > .label-as-text { color: var(--ink-4); }
+.ctl { min-width: 0; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.hint { font: var(--t-hint); color: var(--ink-3); margin: 0; max-width: 52ch; }
+
+/* A paragraph inside a form spans the whole grid, or it lands in the label
+   column and reads as a very long label. */
+.form > .note, .form > p { grid-column: 1 / -1; }
+
+/* The row goes quiet when the switch above it governs it and is off. Not
+   removed: the choices are still worth reading, they just do not apply yet. */
+.field.off > label, .field.off > .label-as-text, .field.off .ctl { opacity: .45; }
+
+/* -- pop-up button ------------------------------------------------------- */
+/* A native <select>, so the keyboard, the pointer and the screen reader all
+ * behave. The chevron is drawn from two gradients in currentColor rather than
+ * an image, so it follows the appearance without a second asset.
+ * pickers.md: a short list belongs in a pop-up button, not a picker. */
+.sel {
+  appearance: none; -webkit-appearance: none;
+  min-height: var(--hit); padding: 0 32px 0 12px;
+  border: 1px solid var(--line-2); border-radius: var(--r-sm);
+  background-color: var(--paper-2); color: var(--ink);
+  font: var(--t-body); cursor: pointer; max-width: 100%;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 18px) calc(50% + 1px), calc(100% - 13px) calc(50% + 1px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+.sel:hover { border-color: var(--ink-4); }
+.sel.sm { min-height: 26px; font: var(--t-hint); padding-right: 28px; }
+
+/* -- text field ---------------------------------------------------------- */
+/* text-fields.md: "match the size of a text field to the quantity of
+ * anticipated text" — a chord is not the width of a folder path. */
+.input {
+  min-height: var(--hit); padding: 0 12px; width: 100%; max-width: 340px;
+  border: 1px solid var(--line-2); border-radius: var(--r-sm);
+  background: var(--paper-2); color: var(--ink); font: var(--t-body);
+}
+.input::placeholder { color: var(--ink-4); }
+.input:hover { border-color: var(--ink-4); }
+.input.mono { font: var(--t-data); }
+.input.num { width: 96px; max-width: 96px; text-align: right; font-variant-numeric: tabular-nums; }
+.input.num.wide { width: 118px; max-width: 118px; }
+
+.suffixed, .withbtn, .slider { display: flex; align-items: center; gap: var(--s2); }
+.suffix { font: var(--t-hint); color: var(--ink-3); }
+.withbtn .input { max-width: 260px; }
+.slider input[type=range] { width: 200px; accent-color: var(--amber); }
+.slider output { font: var(--t-data); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+/* -- switch -------------------------------------------------------------- */
+/* toggles.md: "Avoid relying solely on different colors to communicate state."
+ * The knob moves, which reads in greyscale and at any contrast setting; the
+ * fill is the second, redundant signal. */
+.sw { position: relative; display: inline-flex; align-items: center; min-height: var(--hit); }
+.sw input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.sw i {
+  width: 40px; height: 23px; border-radius: 999px; display: block;
+  background: var(--line-2); position: relative; transition: background .16s ease;
+}
+.sw i::after {
+  content: ''; position: absolute; top: 3px; left: 3px;
+  width: 17px; height: 17px; border-radius: 50%; background: var(--paper-2);
+  box-shadow: 0 1px 3px rgba(15, 17, 23, .35);
+  transition: transform .16s ease;
+}
+.sw input:checked + i { background: var(--amber); }
+.sw input:checked + i::after { transform: translateX(17px); }
+.sw input:focus-visible + i { outline: 2px solid var(--amber-text); outline-offset: 3px; }
+.sw input:disabled + i { opacity: .45; }
+@media (prefers-reduced-motion: reduce) { .sw i, .sw i::after { transition: none } }
+
+/* -- checkbox and radio -------------------------------------------------- */
+.checks { gap: var(--s3); }
+.check, .radio {
+  display: flex; align-items: flex-start; gap: 10px;
+  min-height: 22px; font: var(--t-body); color: var(--ink-2); cursor: pointer;
+}
+.check input, .radio input {
+  width: 16px; height: 16px; margin: 2px 0 0; flex: none;
+  accent-color: var(--amber); cursor: pointer;
+}
+.check:hover, .radio:hover { color: var(--ink); }
+.radiogroup { gap: var(--s3); }
+
+/* The line that says a setting is now on disk. feedback.md keeps this in the
+   interface; an alert for a saved checkbox would be absurd. */
+.saved {
+  font: var(--t-data); color: var(--mint-on-soft); margin: var(--s4) 0 0;
+  min-height: 17px; opacity: 0; transition: opacity .2s ease;
+}
+.saved.on { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .saved { transition: none } }
+
+/* ============================================================== ASK ====== */
+/* A strip that states what can be searched, above the field that searches it.
+ * across.py's first rule — "Every answer says what it searched" — is useless
+ * if the scope is only ever disclosed after the fact. */
+.strip {
+  display: flex; align-items: center; gap: var(--s4); flex-wrap: wrap;
+  margin-top: var(--s5); padding: var(--s4) var(--s5);
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--paper-2); box-shadow: var(--shadow);
+}
+.strip-body { flex: 1; min-width: 240px; }
+.strip-t { font: var(--t-title); }
+.strip-s { font: var(--t-hint); color: var(--ink-3); margin-top: 2px; }
+.strip.complete { background: var(--mint-soft); border-color: transparent; box-shadow: none; }
+
+.asker { display: flex; gap: var(--s2); margin-top: var(--s5); max-width: 760px; }
+.asker .q {
+  flex: 1; max-width: none; min-height: 42px;
+  font: var(--t-prose); border-radius: 999px; padding: 0 var(--s5);
+}
+.asker .btn { min-height: 42px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s3); max-width: 760px; }
+.chip {
+  min-height: 26px; padding: 0 13px; border-radius: 999px;
+  border: 1px solid var(--line-2); background: none; color: var(--ink-3);
+  font: var(--t-hint); cursor: pointer;
+}
+.chip:hover { color: var(--ink); border-color: var(--ink-4); background: var(--paper-2); }
+
+/* The scope line. It is the first thing in an answer, on purpose: an answer
+ * drawn from 38 of 41 meetings is a different answer from one drawn from 41,
+ * and a reader handed the first without being told will read it as the second. */
+.scope {
+  display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap;
+  margin-top: var(--s6); padding-bottom: var(--s3);
+  border-bottom: 1px solid var(--line);
+  font: var(--t-label); letter-spacing: var(--track); text-transform: uppercase;
+  color: var(--ink-4);
+}
+.scope b { color: var(--ink-2); font-weight: 600; }
+.scope .gap { color: var(--amber-text); }
+
+.answer-head { font: var(--t-prose); color: var(--ink); margin: var(--s5) 0 0; max-width: 62ch; }
+
+/* A citation that names the meeting as well as the second is long enough to
+   need a line of its own sometimes. It moves as one block: split across a line
+   break, "Launch checkpoint ·" and "00:06:03" stop reading as one citation. */
+.fact.cross .cite { display: inline-block; max-width: 100%; }
+
+#answer .empty { margin-top: var(--s6); }
+
+.working {
+  display: flex; align-items: center; gap: var(--s3);
+  margin-top: var(--s6); font: var(--t-body); color: var(--ink-3);
+}
+.working .spin { display: inline-block; animation: spin 1.4s linear infinite; color: var(--amber-text); }
+@media (prefers-reduced-motion: reduce) { .working .spin { animation: none } }
+
+/* ======================================================= ASSISTANTS ====== */
+/* A row that reports rather than navigates. `.r` is a button elsewhere; here
+   it is a div, so the pointer must not claim it is clickable. */
+.r.static { cursor: default; }
+.r.static:hover { background: none; }
+.r .act { display: flex; gap: var(--s2); align-items: center; }
+
+.two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s4); margin-top: var(--s5); }
+.panel {
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--paper-2); padding: var(--s4) var(--s5) var(--s5);
+  box-shadow: var(--shadow);
+}
+.panel-k { font: var(--t-label); letter-spacing: var(--track); text-transform: uppercase; color: var(--ink-4); }
+.ticks { list-style: none; margin: var(--s3) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--s2); }
+.ticks li {
+  display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: var(--s2);
+  font: var(--t-hint); color: var(--ink-2);
+}
+/* The glyph is the signal, not its colour — the two panels must stay apart in
+   greyscale (accessibility.md › Color and effects). */
+.ticks li::before { content: '✓'; color: var(--ink-4); }
+.ticks.no li::before { content: '✕'; }
+
+.audit-r { grid-template-columns: minmax(0, 1fr) auto; }
+.audit-r .t { font: var(--t-body); font-weight: 500; }
+.audit-r .s { font: var(--t-hint); color: var(--ink-3); margin-top: 2px; }
+
+/* ----------------------------------------------------------------- narrow */
+@media (max-width: 860px) {
+  .shell { grid-template-columns: 1fr; }
+  .nav {
+    flex-direction: row; align-items: center; overflow-x: auto;
+    border-right: 0; border-bottom: 1px solid var(--line); padding: var(--s2) var(--s3);
+  }
+  .nav .g { display: none; }
+  .nav .foot { margin: 0 0 0 auto; white-space: nowrap; }
+  .body { padding: var(--s5) var(--s4); }
+
+  /* One column: the label sits above its control and leads it, which is the
+     only alignment that still works when there is no second column to
+     align to. */
+  .form { grid-template-columns: minmax(0, 1fr); row-gap: var(--s2); }
+  .field > label, .field > .label-as-text { text-align: left; padding-top: var(--s3); }
+  .ctl { margin-bottom: var(--s3); }
+  .two { grid-template-columns: minmax(0, 1fr); }
+  .asker { flex-wrap: wrap; }
+  .asker .q { min-width: 100%; }
+}
+
+/* Both of the blocks below set `display`, which beats the UA rule for the
+ * `hidden` attribute -- so each needs its own `[hidden]` guard or it shows
+ * whatever JS says. Same convention as `.screen[hidden]` above. */
+.tally[hidden], .notready[hidden] { display: none; }
+
+/* ------------------------------------------------- Library tally ------- *
+ * Counted from the files on disk, never estimated. Laid out as three
+ * numbers and a claim, because the claim is the reason the row exists: the
+ * privacy promise lands hardest beside the pile it is protecting.          */
+.tally {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s5);
+  margin: var(--s4) 0 var(--s5);
+  padding: var(--s4) var(--s5);
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+.tally-n { display: flex; align-items: baseline; gap: 6px; }
+.tally-n b { font: var(--t-title); color: var(--ink); font-variant-numeric: tabular-nums; }
+.tally-n span { font: var(--t-label); color: var(--ink-3); letter-spacing: .04em; }
+.tally-claim {
+  margin-left: auto;
+  font: var(--t-label); letter-spacing: .06em;
+  color: var(--mint-text);
+  background: var(--mint-soft);
+  border-radius: 999px;
+  padding: 6px var(--s4);
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------- This machine -------- *
+ * Actions, not settings. Laid out on one line so a button sits beside the
+ * value it changes, with the note underneath where it is read after the
+ * decision rather than before it.                                         */
+.ctl.act { flex-direction: row; flex-wrap: wrap; align-items: center; gap: var(--s3); }
+.ctl.act .note { margin: 0; flex-basis: 100%; }
+.ctl.act .val {
+  font: var(--t-data); color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  min-width: 14ch;
+}
+.ctl.act .val.ok { color: var(--mint-text); }
+.ctl.act .val.bad { color: var(--risk-text); }
+.ctl.act .val.busy { color: var(--ink-3); font-style: italic; }
+
+/* --------------------------------------------- notes engine missing ---- *
+ * Amber, not red. Nothing is broken and nothing will be lost -- the
+ * recording and the transcript both work. Red here would say "do not press
+ * this", and pressing it is exactly the right thing to do.                */
+.notready {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3);
+  margin: var(--s4) 0 0;
+  padding: var(--s4) var(--s5);
+  background: var(--amber-soft);
+  border: 1px solid var(--amber);
+  border-radius: var(--r-md);
+  font: var(--t-body); color: var(--amber-on-soft);
+}
+.notready strong { font-weight: 600; }
+.notready span { color: var(--amber-text); }
+.notready .btn { margin-left: auto; }
+
+/* ===================================================== first run ========= *
+ * A cover, not a screen. It sits over the whole window because setup is a
+ * thing you finish, and because the app behind it is not usable until the
+ * questions are answered -- showing the nav would be offering doors that go
+ * nowhere yet.                                                             */
+.setup {
+  position: fixed; inset: 0; z-index: 40;
+  display: grid; place-items: center;
+  padding: var(--s5);
+  background: var(--paper);
+}
+.setup[hidden] { display: none; }
+.setup-card {
+  width: min(680px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-lg);
+  padding: var(--s6) var(--s6) var(--s5);
+}
+.setup-step {
+  font: var(--t-label); letter-spacing: .12em; text-transform: uppercase;
+  color: var(--mint-text); margin-bottom: var(--s3);
+}
+.setup-sub { font: var(--t-body); color: var(--ink-3); max-width: 58ch; margin: var(--s3) 0 0; }
+.setup-body { margin: var(--s5) 0 0; display: flex; flex-direction: column; gap: var(--s4); }
+
+/* One option in a list of them. The whole row is the target, not just the
+   dot -- a 14px circle is a poor thing to ask somebody to hit. */
+.su-opt {
+  display: flex; gap: var(--s3); align-items: flex-start;
+  padding: var(--s4); cursor: pointer;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--paper);
+}
+.su-opt:hover { border-color: var(--ink-4); }
+.su-opt[aria-checked="true"] { border-color: var(--amber); background: var(--amber-soft); }
+.su-opt input { margin-top: 3px; }
+.su-opt b { display: block; font-weight: 600; color: var(--ink); }
+.su-opt span { display: block; font: var(--t-body); color: var(--ink-3); margin-top: 2px; }
+.su-path {
+  font: var(--t-data); color: var(--amber-text);
+  word-break: break-all; margin: var(--s2) 0 var(--s3);
+}
+.su-row { display: flex; flex-wrap: wrap; gap: var(--s3); align-items: center; }
+.su-bar { height: 6px; border-radius: 999px; background: var(--track); overflow: hidden; }
+.su-bar i { display: block; height: 100%; background: var(--amber); width: 0; transition: width .25s; }
+.setup-foot {
+  display: flex; align-items: center; gap: var(--s3);
+  margin-top: var(--s6); padding-top: var(--s4);
+  border-top: 1px solid var(--line);
+}
+.setup-foot .primary { margin-left: auto; }
+.setup-outcome { font: var(--t-body); color: var(--ink-3); }
+.setup-outcome.bad { color: var(--risk-text); }
