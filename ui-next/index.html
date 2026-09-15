@@ -783,6 +783,40 @@
           </div>
         </div>
 
+        <!-- ==================================== YOU ====================== -->
+        <!-- What first-run asked, changeable here. These two reach the model
+             as a system message and change emphasis and wording only; the
+             rules that decide what goes in the notes sit after them in the
+             prompt and stay absolute. Blank is a valid answer and turns the
+             whole thing off. -->
+        <div class="grp">
+          <h2 class="grp-h">You</h2>
+          <div class="fields">
+            <div class="field">
+              <label for="set-user-field">Area of work</label>
+              <div class="ctl">
+                <input id="set-user-field" class="input wide" type="text"
+                       list="user-fields" placeholder="not set"
+                       data-setting="USER_FIELD">
+                <datalist id="user-fields"></datalist>
+                <p class="hint">Pick one or type your own. Leave empty to turn
+                  personalisation off.</p>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-user-context">How you use Vlocalhost</label>
+              <div class="ctl">
+                <textarea id="set-user-context" class="input wide" rows="3"
+                          placeholder="not set"
+                          data-setting="USER_CONTEXT"></textarea>
+                <p class="hint">In your words: what you use it for and how you
+                  want notes written. Applies to the next meeting — nothing to
+                  rebuild.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- ==================================== THIS MACHINE ============= -->
         <!-- Parity with the tkinter Settings tab. These are actions rather
              than settings, which is why they sit apart from everything above:

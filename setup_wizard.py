@@ -973,6 +973,16 @@ class Wizard:
 # where Tk is missing -- which is the same build Aurora exists for.
 
 
+#: Areas of work offered on first run. A plain list, not an enum: "Other" is a
+#: real answer, Settings lets them type anything, and Core never branches on
+#: the value -- it is quoted to the model as a description of a person.
+USER_FIELDS = (
+    "Sales", "Customer Success", "Finance", "HR",
+    "Engineering", "Product", "Marketing", "Operations",
+    "Legal", "Consulting", "Executive / Founder", "Other",
+)
+
+
 def builtin_usable() -> bool:
     """Can this build actually run the built-in note writer?
 
@@ -1023,6 +1033,9 @@ def options() -> dict:
         "builtin": {"size_mb": spec.size_mb, "engine": spec.engine},
         "ollama_url": getattr(config, "OLLAMA_URL", ""),
         "ollama_model": getattr(config, "OLLAMA_MODEL", DEFAULT_LLM),
+        "user_fields": list(USER_FIELDS),
+        "user_field": getattr(config, "USER_FIELD", "") or "",
+        "user_context": getattr(config, "USER_CONTEXT", "") or "",
     }
 
 
@@ -1058,6 +1071,13 @@ def plan(choices: dict) -> dict:
         changes["WHISPER_MODEL"] = spec["WHISPER_MODEL"]
         changes["WHISPER_BEAM_SIZE"] = spec["WHISPER_BEAM_SIZE"]
         changes["WHISPER_COMPUTE"] = spec["WHISPER_COMPUTE"]
+
+    # Who the notes are for. `in choices` rather than truthiness: clearing the
+    # box in Settings has to be saveable, and "" is what clearing means.
+    if "user_field" in choices:
+        changes["USER_FIELD"] = (choices.get("user_field") or "").strip()
+    if "user_context" in choices:
+        changes["USER_CONTEXT"] = (choices.get("user_context") or "").strip()
 
     kind = choices.get("notes_kind", "")
     if kind == "builtin":

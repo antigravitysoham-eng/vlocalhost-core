@@ -242,6 +242,36 @@ NOTES_LANGUAGE = "en"
 # Leave as None to use faster-whisper with the settings above.
 CUSTOM_TRANSCRIBER = None
 
+# --- Who the notes are for -----------------------------------------------
+# Optional, and empty out of the box. Asked once on first run and changeable
+# in Settings; both are free for the user to leave blank, and everything works
+# unchanged when they do.
+#
+# These reach the model as a **system message**, not as part of the prompt --
+# `/api/generate` takes a `system` field, and a persona belongs in that slot
+# rather than buried in the instructions. Nothing is baked into a derived
+# model: a change here applies to the very next meeting with nothing to
+# rebuild, and there is one source of truth instead of a settings file and a
+# model in Ollama's store that can drift apart.
+#
+# **They change emphasis and wording, never content.** The fidelity rules in
+# summarizer.py sit after the persona and stay absolute -- everything said goes
+# in whether or not it looks relevant, and nothing that was not said is added.
+# That ordering is deliberate: a small model follows the last instruction it
+# read, and USER_CONTEXT is text a person typed, which means it may ask for
+# something the notes must not do.
+
+#: Their area of work: "Sales", "Customer Success", "Finance", "HR", ...
+#: A plain string, not an enum -- "Other" is a real answer and so is anything
+#: they type.
+USER_FIELD = ""
+
+#: In their own words: what they use Vlocalhost for, and how they want the
+#: notes written. Two or three lines. Quoted to the model as *theirs*, never
+#: merged into the instructions, so it reads as information rather than as a
+#: command.
+USER_CONTEXT = ""
+
 # --- Summarization -------------------------------------------------------
 # Which engine writes the notes. "ollama" is the default and, for now, the only
 # built-in: it runs a model on this machine and is a model manager as well as a

@@ -248,6 +248,17 @@ def fits(engine, prompt: str) -> bool:
 
 
 def _map_part(engine, part: str) -> str:
+    """Pull the facts out of one part. **No persona reaches this call.**
+
+    This step decides *what exists* in the meeting, and the whole design rests
+    on it being complete -- every bullet a reader comes back to is carried
+    through from here mechanically by :func:`_assemble`. Telling it whose notes
+    these are invites it to leave out the part that does not look relevant to
+    them, and a fact dropped here is gone: no later step can recover it.
+
+    Personalisation belongs in :func:`_summarise`, which writes prose from
+    facts already found.
+    """
     # 400 tokens, not the notes cap: this answer is a list of short lines, and
     # a generous cap on a small model is an invitation to write an essay.
     return engine._complete(_MAP_PROMPT.format(part=part), 400, 0).strip()
@@ -424,7 +435,7 @@ def _looks_runaway(item: str) -> bool:
     return len(set(grams)) < len(grams) * 0.8
 
 
-def _assemble(engine, facts, language_directive: str) -> str:
+def _assemble(engine, facts, language_directive: str, system: str = "") -> str:
     """Build the notes: three lists in code, one paragraph from the model.
 
     The merge used to be a single model call that was handed every part's
@@ -463,7 +474,7 @@ def _assemble(engine, facts, language_directive: str) -> str:
                 merged[head].append(item)
 
     out = []
-    summary = _summarise(engine, merged, language_directive)
+    summary = _summarise(engine, merged, language_directive, system)
     out.append("## Summary\n" + summary if summary else "## Summary\nNone recorded.")
     for title, heads, checkbox in _SECTIONS:
         lines = []
@@ -474,7 +485,7 @@ def _assemble(engine, facts, language_directive: str) -> str:
     return "\n\n".join(out)
 
 
-def _summarise(engine, merged, language_directive: str) -> str:
+def _summarise(engine, merged, language_directive: str, system: str = "") -> str:
     """The opening paragraph, and only that.
 
     Capped at 300 tokens rather than the 1024 the notes used to get: this is
@@ -498,7 +509,7 @@ def _summarise(engine, merged, language_directive: str) -> str:
         # little breadth in one sentence and nothing at all in the notes.
         keep = facts[:max(1000, budget(engine) * 2)]
         prompt = _SUMMARY_PROMPT.format(facts=keep, language_rule=language_directive)
-    text = engine._complete(prompt, 300, 0).strip()
+    text = engine._complete(prompt, 300, 0, system=system).strip()
     # A model that ignored "no headings" gets them taken off rather than
     # producing notes with a heading inside a paragraph.
     lines = [l for l in text.splitlines()
@@ -507,7 +518,7 @@ def _summarise(engine, merged, language_directive: str) -> str:
 
 
 def summarize(engine, transcript: str, language_rule: str = "",
-              on_progress=None) -> str:
+              on_progress=None, system: str = "") -> str:
     """Notes for a transcript too long to summarise in one call.
 
     ``on_progress(done, total)`` is called after each part, so a caller that has
@@ -523,4 +534,4 @@ def summarize(engine, transcript: str, language_rule: str = "",
                 on_progress(i + 1, len(parts))
             except Exception:                      # noqa: BLE001
                 pass                               # never let a UI hook stop the notes
-    return _assemble(engine, facts, language_rule)
+    return _assemble(engine, facts, language_rule, system)

@@ -1120,6 +1120,16 @@ async function machine(btn, valueId, work, busyText) {
 function wireMachine() {
   if (!$('#mach-version')) return;
 
+  /* The area-of-work suggestions come from Core, so Settings offers the same
+   * twelve the first-run step did. It is a datalist, not a select: someone
+   * whose job is not on the list must be able to type it. */
+  api().setup_options().then(o => {
+    const dl = $('#user-fields');
+    if (!dl || !o || !o.user_fields) return;
+    dl.replaceChildren();
+    for (const f of o.user_fields) { const opt = el('option'); opt.value = f; dl.append(opt); }
+  }).catch(() => {});
+
   /* Version and engine state are read at boot -- neither touches the network. */
   const refresh = async () => {
     const v = await api().version();
@@ -1369,6 +1379,7 @@ const SU = {
     /* Overwritten from `options().notes_kind_default` in suStart(); Core
      * decides, because Core is the side that knows what this build can run. */
     notes_kind: 'ollama', ollama_url: '', ollama_model: '',
+    user_field: '', user_context: '',
   },
 };
 
@@ -1418,6 +1429,40 @@ const SU_STEPS = [
       box.append(el('p', 'note', 'Updating or reinstalling the app never touches '
         + 'this folder. Point it at a synced folder and your notes follow you '
         + 'between machines.'));
+      return box;
+    },
+  },
+  {
+    head: 'What kind of work do you do?',
+    sub: 'So the notes come out in a shape that suits you. Both answers are '
+       + 'optional, stay on this machine, and can be changed in Settings.',
+    draw() {
+      const box = el('div');
+
+      box.append(el('div', 'meta', 'Area of work'));
+      const grid = el('div', 'su-grid');
+      for (const f of SU.opts.user_fields) {
+        const row = suOption('su-field', f, f, '', v => { SU.choice.user_field = v; });
+        row.classList.add('su-chip');
+        if (f === SU.choice.user_field) {
+          row.setAttribute('aria-checked', 'true');
+          row.querySelector('input').checked = true;
+        }
+        grid.append(row);
+      }
+      box.append(grid);
+
+      box.append(el('div', 'meta', 'How do you want to use Vlocalhost?'));
+      const ta = el('textarea', 'input wide');
+      ta.rows = 3;
+      ta.placeholder = 'Customer calls, mostly. Short and blunt — what they '
+        + 'asked for and what we promised.';
+      ta.value = SU.choice.user_context || '';
+      ta.oninput = () => { SU.choice.user_context = ta.value; };
+      box.append(ta);
+      box.append(el('p', 'note', 'Two or three lines. This shapes how the notes '
+        + 'are written — what comes first, and in what tone. It never changes '
+        + 'what is in them: everything said goes in, and nothing else does.'));
       return box;
     },
   },
@@ -1585,6 +1630,7 @@ const SU_STEPS = [
       const kinds = { builtin: 'Built in', ollama: 'Ollama', skip: 'Not now' };
       const rows = [
         ['Notes folder', SU.choice.notes_dir],
+        ['Area of work', SU.choice.user_field],
         ['Language', lang && lang.label],
         ['Transcription', SU.choice.custom_model || (prof && prof.label)],
         ['Summaries', kinds[SU.choice.notes_kind]],
@@ -1621,6 +1667,8 @@ async function suStart() {
   SU.choice.language = opts.language_default;
   SU.choice.profile = opts.profile_default;
   SU.choice.notes_kind = opts.notes_kind_default || 'ollama';
+  SU.choice.user_field = opts.user_field || '';
+  SU.choice.user_context = opts.user_context || '';
   SU.choice.ollama_url = opts.ollama_url;
   SU.choice.ollama_model = opts.ollama_model;
   $('#setup').hidden = false;

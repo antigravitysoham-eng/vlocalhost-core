@@ -176,6 +176,52 @@ def _language_rule() -> str:
     return _LANGUAGE_RULE.format(directive=_language_directive())
 
 
+#: The persona, as a system message. Deliberately short: it says who the reader
+#: is and what they asked for, and then hands the actual rules back to the
+#: prompt. Everything it is allowed to influence is named, and so is everything
+#: it is not.
+#:
+#: The user's own words are quoted rather than pasted in as instructions. They
+#: typed them into a settings box, which means they may say something the notes
+#: must not do -- "make me sound decisive", "always give a revenue number" --
+#: and a 3B model handed that as an instruction will oblige by inventing. As a
+#: quoted description of a person it informs; as an instruction it would
+#: corrupt.
+SEP = chr(10)
+
+_PERSONA = """You are writing meeting notes for one particular person.
+
+{who}
+
+This changes the Summary paragraph only -- what it leads with, and the words it chooses. The lists below it are not yours to shape.
+
+Everything that was said belongs in the notes whether or not it looks relevant to this person's work. Every name, every date and every commitment stays, with whoever said it still attached to it -- a task whose owner has been dropped is worse than no task at all. Nothing that was not said may be added. Where this description and those rules disagree, the rules win."""
+
+
+def persona() -> str:
+    """The system message for this user, or "" when they told us nothing.
+
+    Empty is the out-of-the-box state and a perfectly good answer: with no
+    field and no context this returns "", no system message is sent, and the
+    model sees exactly what it saw before any of this existed.
+    """
+    field = (getattr(config, "USER_FIELD", "") or "").strip()
+    context = (getattr(config, "USER_CONTEXT", "") or "").strip()
+    if not field and not context:
+        return ""
+
+    lines = []
+    if field:
+        lines.append(f"Their area of work is {field}.")
+    if context:
+        # Collapsed to one paragraph: a settings box collects newlines, and a
+        # system message reads better without them.
+        tidy = " ".join(context.split())
+        lines.append("In their own words, asked what they use this for and how "
+                     f"they want notes written: \"{tidy}\"")
+    return _PERSONA.format(who=SEP.join(lines))
+
+
 def _notes_prompt(transcript: str) -> str:
     """The notes prompt, timestamps stripped on the way in."""
     return _PROMPT.format(transcript=strip_timestamps(transcript),
@@ -254,18 +300,37 @@ class OllamaSummarizer:
     def _num_ctx() -> int:
         return int(getattr(config, "OLLAMA_NUM_CTX", 8192) or 8192)
 
-    def _generate(self, prompt: str, timeout: int) -> str:
+    def _generate(self, prompt: str, timeout: int, system: str = "") -> str:
+        """One call to Ollama. ``system`` goes in the system slot, not the prompt.
+
+        `/api/generate` takes a `system` field and applies the model template's
+        system slot to it -- measured, not assumed. That is where a persona
+        belongs: a slot the model treats as standing context, rather than
+        instructions competing with the ones that matter in the prompt body.
+        Sent only when there is one, so a user who filled nothing in gets a
+        request byte-identical to the one this made before any of it existed.
+        """
+        payload = {"model": config.OLLAMA_MODEL, "prompt": prompt,
+                   "stream": False,
+                   "options": {"num_ctx": self._num_ctx()}}
+        if system:
+            payload["system"] = system
         resp = requests.post(
             f"{config.OLLAMA_URL}/api/generate",
-            json={"model": config.OLLAMA_MODEL, "prompt": prompt, "stream": False,
-                  "options": {"num_ctx": self._num_ctx()}},
+            json=payload,
             timeout=timeout,
         )
         resp.raise_for_status()
         return resp.json().get("response", "").strip()
 
-    def _complete(self, prompt: str, max_tokens: int, min_tokens: int = 0) -> str:
+    def _complete(self, prompt: str, max_tokens: int, min_tokens: int = 0,
+                  system: str = "") -> str:
         """The raw prompt-to-text call :mod:`rolling` needs.
+
+        ``system`` is passed through rather than assumed: :mod:`rolling` uses
+        this for two different jobs -- pulling facts out of one chunk, and
+        writing the closing paragraph -- and only the second should carry a
+        persona. Priming extraction is how facts go missing.
 
         The two embedded engines already had one; this gives Ollama the same
         shape so chunked summarisation is not a feature only some engines get.
@@ -273,17 +338,19 @@ class OllamaSummarizer:
         Ollama's ``num_predict`` would cap the notes and it has no floor at all,
         and every engine here is allowed to ignore a hint it cannot honour.
         """
-        return self._generate(prompt, 600)
+        return self._generate(prompt, 600, system=system)
 
     def title(self, transcript: str) -> str:
         try:
-            return self._generate(_title_prompt(transcript), 120)
+            return self._generate(_title_prompt(transcript), 120,
+                                  system=persona())
         except requests.exceptions.RequestException:
             return ""
 
     def summarize(self, transcript: str) -> str:
         try:
-            return self._generate(_notes_prompt(transcript), 600)
+            return self._generate(_notes_prompt(transcript), 600,
+                                  system=persona())
         except requests.exceptions.ConnectionError as e:
             raise RuntimeError(
                 "Could not reach Ollama. Is it running? Start it with "
@@ -950,4 +1017,5 @@ def summarize(transcript: str, on_progress=None) -> str:
         return collapse_repeats(scrub_timestamps(eng.summarize(transcript)))
 
     return collapse_repeats(scrub_timestamps(rolling.summarize(
-        eng, transcript, _language_directive(), on_progress)))
+        eng, transcript, _language_directive(), on_progress,
+        system=persona())))

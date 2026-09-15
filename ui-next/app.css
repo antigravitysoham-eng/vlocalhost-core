@@ -627,3 +627,17 @@ body {
 .setup-foot .primary { margin-left: auto; }
 .setup-outcome { font: var(--t-body); color: var(--ink-3); }
 .setup-outcome.bad { color: var(--risk-text); }
+
+/* ------------------------------------------- first run: area of work ---- *
+ * Twelve chips in a grid rather than twelve stacked rows: the whole list has
+ * to be visible at once for someone to recognise their own job in it, and a
+ * scrolling column of radio buttons makes that a hunt.                      */
+.su-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--s3);
+  margin: var(--s2) 0 var(--s4);
+}
+.su-chip { padding: var(--s3) var(--s4); align-items: center; }
+.su-chip b { font-weight: 500; }
+textarea.input { resize: vertical; min-height: 68px; line-height: 1.5; font: var(--t-body); }
