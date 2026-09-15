@@ -1124,10 +1124,15 @@ function wireMachine() {
    * twelve the first-run step did. It is a datalist, not a select: someone
    * whose job is not on the list must be able to type it. */
   api().setup_options().then(o => {
-    const dl = $('#user-fields');
-    if (!dl || !o || !o.user_fields) return;
-    dl.replaceChildren();
-    for (const f of o.user_fields) { const opt = el('option'); opt.value = f; dl.append(opt); }
+    if (!o) return;
+    const fill = (id, values) => {
+      const dl = $('#' + id);
+      if (!dl || !values) return;
+      dl.replaceChildren();
+      for (const v of values) { const opt = el('option'); opt.value = v; dl.append(opt); }
+    };
+    fill('user-fields', o.user_fields);
+    fill('user-tones', o.user_tones);
   }).catch(() => {});
 
   /* Version and engine state are read at boot -- neither touches the network. */
@@ -1379,11 +1384,39 @@ const SU = {
     /* Overwritten from `options().notes_kind_default` in suStart(); Core
      * decides, because Core is the side that knows what this build can run. */
     notes_kind: 'ollama', ollama_url: '', ollama_model: '',
-    user_field: '', user_context: '',
+    user_field: '', user_tone: '', user_context: '',
   },
 };
 
 const suBody = () => $('#su-body');
+
+/* A labelled row of single-click choices. Chips size to their own label rather
+ * than to a grid column: twelve fixed-width pills wide enough for "Customer
+ * Success" made "HR" look like a mistake, and pushed the row that matters off
+ * the bottom of the card. Clicking a chosen chip clears it, because "none of
+ * these" is a real answer and there is no other way to say it. */
+function chipRow(label, name, values, get, set) {
+  const row = el('div', 'chiprow');
+  row.append(el('div', 'chiprow-h', label));
+  const chips = el('div', 'chips');
+  chips.setAttribute('role', 'radiogroup');
+  chips.setAttribute('aria-label', label);
+  for (const v of values || []) {
+    const chip = el('button', 'chip', v);
+    chip.type = 'button';
+    chip.setAttribute('role', 'radio');
+    const mark = () => chip.setAttribute('aria-checked', String(get() === v));
+    mark();
+    chip.onclick = () => {
+      set(get() === v ? '' : v);
+      $$('.chip', chips).forEach(c => c.setAttribute(
+        'aria-checked', String(c.textContent === get())));
+    };
+    chips.append(chip);
+  }
+  row.append(chips);
+  return row;
+}
 
 function suOption(name, value, title, blurb, onPick) {
   const row = el('label', 'su-opt');
@@ -1434,35 +1467,47 @@ const SU_STEPS = [
   },
   {
     head: 'What kind of work do you do?',
-    sub: 'So the notes come out in a shape that suits you. Both answers are '
-       + 'optional, stay on this machine, and can be changed in Settings.',
+    sub: 'So the notes come out in a shape that suits you. Optional, and '
+       + 'changeable any time in Settings.',
     draw() {
       const box = el('div');
 
-      box.append(el('div', 'meta', 'Area of work'));
-      const grid = el('div', 'su-grid');
-      for (const f of SU.opts.user_fields) {
-        const row = suOption('su-field', f, f, '', v => { SU.choice.user_field = v; });
-        row.classList.add('su-chip');
-        if (f === SU.choice.user_field) {
-          row.setAttribute('aria-checked', 'true');
-          row.querySelector('input').checked = true;
-        }
-        grid.append(row);
-      }
-      box.append(grid);
+      /* Two rows of chips and nothing to type. Setup is not the place to ask
+       * somebody to compose a paragraph about themselves -- the first version
+       * of this step did, and an empty textarea with a vanishing placeholder
+       * is a step people skip. Both answers here are one click. */
+      box.append(chipRow('Area of work', 'su-field', SU.opts.user_fields,
+                         () => SU.choice.user_field,
+                         v => { SU.choice.user_field = v; }));
 
-      box.append(el('div', 'meta', 'How do you want to use Vlocalhost?'));
-      const ta = el('textarea', 'input wide');
-      ta.rows = 3;
-      ta.placeholder = 'Customer calls, mostly. Short and blunt — what they '
-        + 'asked for and what we promised.';
-      ta.value = SU.choice.user_context || '';
-      ta.oninput = () => { SU.choice.user_context = ta.value; };
-      box.append(ta);
-      box.append(el('p', 'note', 'Two or three lines. This shapes how the notes '
-        + 'are written — what comes first, and in what tone. It never changes '
-        + 'what is in them: everything said goes in, and nothing else does.'));
+      box.append(chipRow('How should the notes read?', 'su-tone',
+                         SU.opts.user_tones,
+                         () => SU.choice.user_tone,
+                         v => { SU.choice.user_tone = v; }));
+
+      /* Folded away, because it is for the few people who want it and it must
+       * not be the thing the eye lands on. One line, not three. */
+      const more = el('div', 'su-more');
+      const toggle = el('button', 'disclose');
+      toggle.setAttribute('aria-expanded', SU.choice.user_context ? 'true' : 'false');
+      toggle.append(el('span', 'tri', '\u25B6'),
+                    document.createTextNode(' Anything else worth knowing'));
+      const wrap = el('div', 'su-more-in');
+      wrap.hidden = !SU.choice.user_context;
+      const inp = el('input', 'input wide');
+      inp.type = 'text';
+      inp.placeholder = 'e.g. mostly customer calls — skip the small talk';
+      inp.value = SU.choice.user_context || '';
+      inp.oninput = () => { SU.choice.user_context = inp.value; };
+      wrap.append(inp);
+      toggle.onclick = () => {
+        const open = toggle.getAttribute('aria-expanded') !== 'true';
+        toggle.setAttribute('aria-expanded', String(open));
+        wrap.hidden = !open;
+        if (open) inp.focus();
+      };
+      more.append(toggle, wrap);
+      box.append(more);
       return box;
     },
   },
@@ -1631,6 +1676,7 @@ const SU_STEPS = [
       const rows = [
         ['Notes folder', SU.choice.notes_dir],
         ['Area of work', SU.choice.user_field],
+        ['Notes read', SU.choice.user_tone],
         ['Language', lang && lang.label],
         ['Transcription', SU.choice.custom_model || (prof && prof.label)],
         ['Summaries', kinds[SU.choice.notes_kind]],
@@ -1668,6 +1714,7 @@ async function suStart() {
   SU.choice.profile = opts.profile_default;
   SU.choice.notes_kind = opts.notes_kind_default || 'ollama';
   SU.choice.user_field = opts.user_field || '';
+  SU.choice.user_tone = opts.user_tone || '';
   SU.choice.user_context = opts.user_context || '';
   SU.choice.ollama_url = opts.ollama_url;
   SU.choice.ollama_model = opts.ollama_model;

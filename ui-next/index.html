@@ -804,14 +804,22 @@
               </div>
             </div>
             <div class="field">
-              <label for="set-user-context">How you use Vlocalhost</label>
+              <label for="set-user-tone">Notes should read</label>
               <div class="ctl">
-                <textarea id="set-user-context" class="input wide" rows="3"
-                          placeholder="not set"
-                          data-setting="USER_CONTEXT"></textarea>
-                <p class="hint">In your words: what you use it for and how you
-                  want notes written. Applies to the next meeting — nothing to
-                  rebuild.</p>
+                <input id="set-user-tone" class="input wide" type="text"
+                       list="user-tones" placeholder="not set"
+                       data-setting="USER_TONE">
+                <datalist id="user-tones"></datalist>
+                <p class="hint">Pick one or describe your own.</p>
+              </div>
+            </div>
+            <div class="field">
+              <label for="set-user-context">Anything else</label>
+              <div class="ctl">
+                <input id="set-user-context" class="input wide" type="text"
+                       placeholder="not set" data-setting="USER_CONTEXT">
+                <p class="hint">Optional. Applies to the next meeting — nothing
+                  to rebuild.</p>
               </div>
             </div>
           </div>

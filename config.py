@@ -266,10 +266,17 @@ CUSTOM_TRANSCRIBER = None
 #: they type.
 USER_FIELD = ""
 
-#: In their own words: what they use Vlocalhost for, and how they want the
-#: notes written. Two or three lines. Quoted to the model as *theirs*, never
-#: merged into the instructions, so it reads as information rather than as a
-#: command.
+#: How they want the notes to read: "Short and blunt", "Full detail",
+#: "Decisions and owners only", "Formal", "Casual" -- or anything they type.
+#: A separate key from USER_CONTEXT rather than a sentence folded into it, so
+#: Settings can show which one is chosen instead of guessing from prose.
+USER_TONE = ""
+
+#: Anything else, in their own words. Optional and usually empty: the two
+#: fields above cover most of it in two clicks, and asking somebody to write a
+#: paragraph during setup is how a setup step gets skipped. Quoted to the model
+#: as *theirs*, never merged into the instructions, so it reads as information
+#: about a person rather than as a command.
 USER_CONTEXT = ""
 
 # --- Summarization -------------------------------------------------------

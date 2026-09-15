@@ -582,21 +582,40 @@ body {
 }
 .setup[hidden] { display: none; }
 .setup-card {
-  width: min(680px, 100%);
+  /* 560, not 680. A setup card is read, not worked in: at 680 the chip rows
+     ran nearly the full width and the card read as a page rather than as a
+     question being asked. The narrower measure also wraps the sub line to a
+     comfortable length without a max-width of its own. */
+  width: min(560px, 100%);
+  /* A column whose middle scrolls, not a box that scrolls whole. Shrink the
+     window and the card used to scroll as one piece, which took Back and Next
+     off the bottom with it -- the two controls that must never be out of
+     reach. Now the step body is the only thing that moves. */
   max-height: 100%;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   background: var(--paper-2);
   border: 1px solid var(--line);
   border-radius: var(--r);
   box-shadow: var(--shadow-lg);
-  padding: var(--s6) var(--s6) var(--s5);
+  padding: var(--s5) var(--s5) var(--s4);
 }
+/* The page heading is 30px, which is right on a screen and shouts inside a
+   560px card. */
+.setup-card .h { font: 800 22px/1.15 var(--f); }
+
 .setup-step {
   font: var(--t-label); letter-spacing: .12em; text-transform: uppercase;
   color: var(--mint-text); margin-bottom: var(--s3);
 }
-.setup-sub { font: var(--t-body); color: var(--ink-3); max-width: 58ch; margin: var(--s3) 0 0; }
-.setup-body { margin: var(--s5) 0 0; display: flex; flex-direction: column; gap: var(--s4); }
+.setup-sub { font: var(--t-body); color: var(--ink-3); margin: var(--s2) 0 0; }
+.setup-body {
+  margin: var(--s4) 0 0;
+  display: flex; flex-direction: column; gap: var(--s3);
+  overflow-y: auto;        /* the only scrolling part */
+  min-height: 0;           /* or flex refuses to let it shrink */
+}
 
 /* One option in a list of them. The whole row is the target, not just the
    dot -- a 14px circle is a poor thing to ask somebody to hit. */
@@ -621,23 +640,65 @@ body {
 .su-bar i { display: block; height: 100%; background: var(--amber); width: 0; transition: width .25s; }
 .setup-foot {
   display: flex; align-items: center; gap: var(--s3);
-  margin-top: var(--s6); padding-top: var(--s4);
+  margin-top: var(--s5); padding-top: var(--s3);
   border-top: 1px solid var(--line);
+  flex-shrink: 0;
 }
 .setup-foot .primary { margin-left: auto; }
 .setup-outcome { font: var(--t-body); color: var(--ink-3); }
 .setup-outcome.bad { color: var(--risk-text); }
 
-/* ------------------------------------------- first run: area of work ---- *
- * Twelve chips in a grid rather than twelve stacked rows: the whole list has
- * to be visible at once for someone to recognise their own job in it, and a
- * scrolling column of radio buttons makes that a hunt.                      */
-.su-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: var(--s3);
-  margin: var(--s2) 0 var(--s4);
+
+/* ------------------------------------------------ first run: chips ------ *
+ * A choice you make with one click, sized to its own label.
+ *
+ * The first version laid twelve fixed-width pills on a 190px grid. "Customer
+ * Success" set the width, so "HR" became a 290px button with a word floating
+ * in it, the twelve of them filled the card, and the question that mattered
+ * more -- how the notes should read -- got pushed under the fold. Chips that
+ * fit their text put both rows on screen together, which is the whole point
+ * of asking them on one step.                                              */
+.chiprow { margin: 0 0 var(--s4); }
+.chiprow-h {
+  font: var(--t-label); letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-3); margin-bottom: var(--s2);
 }
-.su-chip { padding: var(--s3) var(--s4); align-items: center; }
-.su-chip b { font-weight: 500; }
-textarea.input { resize: vertical; min-height: 68px; line-height: 1.5; font: var(--t-body); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.chip {
+  font: var(--t-body);
+  color: var(--ink-2);
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 6px var(--s3);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color .12s, background .12s, color .12s;
+}
+.chip:hover { border-color: var(--ink-4); color: var(--ink); }
+.chip:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+/* Selected is a filled chip, not a tick beside one: at this size the fill is
+   readable across the room and a 14px radio dot is not. Amber is the one
+   accent this app spends on "you did something", and it is spent here. */
+.chip[aria-checked="true"] {
+  background: var(--amber);
+  border-color: var(--amber);
+  color: #1A1206;
+  font-weight: 600;
+}
+.chip[aria-checked="true"]:hover { border-color: var(--amber); }
+
+/* The optional note. Folded, quiet, and one line — it is for the few people
+   who want it, and it must not be what the eye lands on. */
+.su-more { margin-top: var(--s3); }
+/* The base .disclose is a section header -- uppercase and letterspaced. This
+   one is an aside offered to the few people who want it, so it drops both and
+   speaks in sentence case. */
+.su-more .disclose {
+  font: var(--t-body); color: var(--ink-3);
+  text-transform: none; letter-spacing: normal;
+}
+.su-more .disclose:hover { color: var(--ink-2); }
+.su-more-in { margin-top: var(--s3); }

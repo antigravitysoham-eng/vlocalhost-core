@@ -62,6 +62,7 @@ EDITABLE = (
     # Who the notes are for. Editable so Settings can change what first-run
     # asked, and so a change applies to the next meeting with nothing rebuilt.
     "USER_FIELD",
+    "USER_TONE",
     "USER_CONTEXT",
     # "module:ClassName" of a speech engine to use instead of faster-whisper.
     # This imports and runs code the user names, so the Settings tab keeps it

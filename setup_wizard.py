@@ -973,6 +973,21 @@ class Wizard:
 # where Tk is missing -- which is the same build Aurora exists for.
 
 
+# **The tkinter wizard does not ask the two persona questions, deliberately.**
+# It is the window a machine gets when it cannot run Aurora, and adding a sixth
+# tk step for an optional feature is work spent on the fallback path. The
+# degradation is clean: both fields stay empty, `persona()` returns "", and
+# those users get exactly the notes this app produced before personalisation
+# existed.
+#
+# What matters is that it cannot *undo* the feature either. `plan()` tests
+# `"user_field" in choices` rather than truthiness, so a wizard that never
+# collected the key leaves the saved value alone -- someone who set a persona
+# in Aurora and later runs `--classic` keeps it. Clearing the box in Settings
+# still saves "", because there the key is present and empty.
+#
+# If the tkinter window ever stops being a fallback, this is the gap to close.
+
 #: Areas of work offered on first run. A plain list, not an enum: "Other" is a
 #: real answer, Settings lets them type anything, and Core never branches on
 #: the value -- it is quoted to the model as a description of a person.
@@ -980,6 +995,18 @@ USER_FIELDS = (
     "Sales", "Customer Success", "Finance", "HR",
     "Engineering", "Product", "Marketing", "Operations",
     "Legal", "Consulting", "Executive / Founder", "Other",
+)
+
+
+#: How the notes should read. Offered as a row of chips beside the area of
+#: work, because two clicks is a setup step people finish and a paragraph is
+#: one they skip. Not an enum either -- Settings lets them type their own.
+USER_TONES = (
+    "Short and blunt",
+    "Full detail",
+    "Decisions and owners only",
+    "Formal",
+    "Casual",
 )
 
 
@@ -1034,7 +1061,9 @@ def options() -> dict:
         "ollama_url": getattr(config, "OLLAMA_URL", ""),
         "ollama_model": getattr(config, "OLLAMA_MODEL", DEFAULT_LLM),
         "user_fields": list(USER_FIELDS),
+        "user_tones": list(USER_TONES),
         "user_field": getattr(config, "USER_FIELD", "") or "",
+        "user_tone": getattr(config, "USER_TONE", "") or "",
         "user_context": getattr(config, "USER_CONTEXT", "") or "",
     }
 
@@ -1076,6 +1105,8 @@ def plan(choices: dict) -> dict:
     # box in Settings has to be saveable, and "" is what clearing means.
     if "user_field" in choices:
         changes["USER_FIELD"] = (choices.get("user_field") or "").strip()
+    if "user_tone" in choices:
+        changes["USER_TONE"] = (choices.get("user_tone") or "").strip()
     if "user_context" in choices:
         changes["USER_CONTEXT"] = (choices.get("user_context") or "").strip()
 

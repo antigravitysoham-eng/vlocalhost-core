@@ -206,13 +206,16 @@ def persona() -> str:
     model sees exactly what it saw before any of this existed.
     """
     field = (getattr(config, "USER_FIELD", "") or "").strip()
+    tone = (getattr(config, "USER_TONE", "") or "").strip()
     context = (getattr(config, "USER_CONTEXT", "") or "").strip()
-    if not field and not context:
+    if not field and not tone and not context:
         return ""
 
     lines = []
     if field:
         lines.append(f"Their area of work is {field}.")
+    if tone:
+        lines.append(f"They asked for notes that read: {tone}.")
     if context:
         # Collapsed to one paragraph: a settings box collects newlines, and a
         # system message reads better without them.
