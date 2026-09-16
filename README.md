@@ -30,6 +30,8 @@ system audio ─┘        (silence ignored)         (local)            │
 
 Runs on **Windows, macOS, and Linux**. Free forever, AGPL-3.0.
 
+Downloads and docs: **[vlocal.host](https://vlocal.host/)** — [install](https://vlocal.host/install/) · [security](https://vlocal.host/security/) · [support](https://vlocal.host/support/)
+
 ## Private by construction, not by promise
 
 Plenty of tools promise not to upload your meetings. This one ships without the
@@ -348,7 +350,7 @@ describes its own credential prompt so the window stays generic.
 **Vlocalhost Pro** is the commercial edition that ships ready-made Google
 (Calendar + Gmail) and Microsoft (Outlook Calendar + Mail) providers, plus
 automation, team and enterprise features, built on exactly this extension point
-— <https://vlocalhost.ai/pricing>. Core is not a trial and does not expire; if
+— <https://vlocal.host/pricing/>. Core is not a trial and does not expire; if
 you only want to record your own meetings privately, you are already done.
 
 ## Notes & limits
