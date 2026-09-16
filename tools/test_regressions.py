@@ -93,8 +93,14 @@ def the_page_is_in_the_build():
     bundler's `*.py` rule. Left out, the app installs, launches, and shows an
     empty frame with a green build.
     """
-    bundler = read("tools", "build_bundle.py")
-    assert '"ui-next"' in bundler, "ui-next dropped from INCLUDE_DIRS"
+    # The bundler itself is not shipped -- `tools` is in SKIP_DIRS -- so this
+    # half only runs against the source tree. Against a bundle the files being
+    # present *is* the check, and it is the stronger one: it tests the outcome
+    # rather than the intent.
+    bundler_path = os.path.join(ROOT, "tools", "build_bundle.py")
+    if os.path.isfile(bundler_path):
+        assert '"ui-next"' in read("tools", "build_bundle.py"), \
+            "ui-next dropped from INCLUDE_DIRS"
     for name in ("index.html", "app.js", "app.css", "tokens.css",
                  "api.py", "shell.py"):
         assert os.path.isfile(os.path.join(ROOT, "ui-next", name)), \
