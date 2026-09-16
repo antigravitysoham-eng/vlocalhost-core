@@ -892,7 +892,7 @@ const live = {
     if (type === 'line') { line('', null, p.text); pulse(); }
     else if (type === 'level') realLevel(p.db, p.speech);
     else if (type === 'pull') suPull(p);
-    else if (type === 'partial') { $('#gate').textContent = 'Transcribing…'; pulse(); }
+    else if (type === 'partial') { interim(p.text, p.who); pulse(); }
     else if (type === 'state') {
       if (p.listening) {
         $('#rec-title').textContent = p.title || 'Recording';
@@ -1805,4 +1805,39 @@ async function askWhoFor() {
     FR.field = ''; FR.tone = '';
     firstRunCard(o);
   } catch (e) { /* a missing card is better than a broken screen */ }
+}
+
+/* ================================================= provisional text ====== *
+ *
+ * The words as they are being heard, before the sentence is final.
+ *
+ * The engine has always sent these; this window used to drop them on the floor
+ * and show "Transcribing…" instead. That is why the transcript felt slow after
+ * the rewrite even though it was not: the pipeline waits 800ms of silence to
+ * decide you have stopped, then decodes, so a finished line lands ~1.8s after
+ * you stop talking -- measured 1770ms median, against 1746ms on the v1.1.1
+ * baseline, with the decode itself *faster* than it used to be.
+ *
+ * Nothing about that is fixable by making the model quicker. What fixes it is
+ * showing the guess while the sentence is still being spoken, so the wait is
+ * filled rather than empty. Restoring this changes no engine timing at all.
+ *
+ * Grey and italic, and replaced wholesale by the real line when it arrives --
+ * `line()` already removes `.ln.interim` before appending. It must never be
+ * mistaken for the transcript: it is a guess, and it says so by looking like
+ * one.
+ */
+function interim(text, who) {
+  if (!text) return;
+  $$('.ln.interim', lines).forEach(n => n.remove());
+  $$('.ln.hint', lines).forEach(n => n.remove());
+  const row = el('div', 'ln interim');
+  row.append(el('span', 'ts', ''));
+  const p = el('p');
+  if (who) p.append(el('span', 'who', who), document.createTextNode(' — ' + text));
+  else p.textContent = text;
+  row.append(p);
+  lines.append(row);
+  row.scrollIntoView({ block: 'nearest' });
+  $('#gate').textContent = `Hearing · ${sourceLabel()}`;
 }
