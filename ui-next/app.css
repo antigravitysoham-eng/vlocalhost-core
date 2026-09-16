@@ -49,6 +49,21 @@ body {
 @media (prefers-reduced-transparency: reduce) {
   .chrome { background: var(--paper-2); -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
+/* The mark breathes while the room is loud. Driven by the real input level
+   -- `--lvl` is set from the same on_level reports the meter draws, so it can
+   never pulse on a silent room. Idle it is perfectly still: an animation that
+   runs when nothing is happening is decoration, and this app does not have
+   the credibility to spend on decoration. */
+.chrome svg {
+  transform: scale(calc(1 + var(--lvl, 0) * .12));
+  filter: drop-shadow(0 0 calc(var(--lvl, 0) * 10px)
+                      rgba(255, 180, 61, calc(var(--lvl, 0) * .55)));
+  transition: transform .09s ease-out, filter .09s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chrome svg { transform: none; filter: none; transition: none; }
+}
+
 .chrome .t {
   font: var(--t-label); letter-spacing: var(--track);
   text-transform: uppercase; color: var(--ink-4);
@@ -132,15 +147,19 @@ body {
 /* Tall while the mic is open, short while it is not. Holding the full 92px at
    idle left a blank the height of a paragraph above a row of grey stubs, which
    reads as a rendering fault rather than as silence. */
+/* 44px live, 14px idle. It was 92/26, which made a quiet screen mostly
+   meter -- the single loudest element in the window, spending that weight on
+   "nothing is happening". Loud while it has something to say; a thin line
+   when it does not. */
 .wave { display: flex; align-items: flex-end; justify-content: space-between;
-        gap: 4px; height: 92px; margin: var(--s5) 0 var(--s2);
+        gap: 3px; height: 44px; margin: var(--s4) 0 6px;
         transition: height .2s ease; }
-.wave.idle { height: 26px; }
+.wave.idle { height: 14px; opacity: .55; }
 @media (prefers-reduced-motion: reduce) { .wave { transition: none } }
 /* Slim capsules, spread across the width. Left to flex:1 alone they grow to
    ~50px each on a wide window and stop reading as a level meter at all. */
 .wave i {
-  flex: 1 1 0; max-width: 13px; border-radius: 999px; display: block; min-height: 4px;
+  flex: 1 1 0; max-width: 9px; border-radius: 999px; display: block; min-height: 3px;
   background: linear-gradient(180deg, var(--amber-l), rgba(255, 180, 61, .35));
   transition: height .12s linear;
 }
@@ -150,7 +169,6 @@ body {
 .scale {
   display: flex; justify-content: space-between; gap: var(--s3);
   font: var(--t-label); color: var(--ink-4); letter-spacing: .1em;
-  padding-top: var(--s3); border-top: 1px solid var(--line);
 }
 
 /* --------------------------------------------------------- disclosure rows */
@@ -728,4 +746,44 @@ body {
   display: flex; gap: var(--s3); align-items: center;
   margin-top: var(--s4); padding-top: var(--s3);
   border-top: 1px solid var(--line);
+}
+
+/* ------------------------------------------------ library: filter row --- *
+ * Two controls, one line, above the list. A range and a toggle -- not a
+ * search box, because "which week was that" is the question people actually
+ * arrive with and a text field cannot answer it without them remembering a
+ * word from the meeting.                                                    */
+.libfilter {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s4);
+  margin: 0 0 var(--s4);
+}
+.libfilter[hidden] { display: none; }
+.libfull {
+  display: flex; align-items: center; gap: 8px; margin-left: auto;
+  font: var(--t-body); color: var(--ink-3); cursor: pointer; user-select: none;
+}
+.libfull input { accent-color: var(--amber); }
+
+/* The saved notes, shown as they read in the file. Monospace and preserved
+   line breaks on purpose: this is the artifact on disk, not a rendering of
+   it, and it should look like something you could open in Notepad -- because
+   you can. */
+.r .full {
+  margin: var(--s3) 0 0; padding: var(--s3) var(--s4);
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font: var(--t-data); color: var(--ink-2);
+  white-space: pre-wrap; max-height: 320px; overflow-y: auto;
+}
+.r .full.empty { color: var(--ink-4); font-style: italic; white-space: normal; }
+.libcount { font: var(--t-label); color: var(--ink-4); letter-spacing: .06em; }
+
+/* `.meta` is a label style — uppercase and letterspaced, right for "NO
+   SESSION" and wrong for a sentence. The line under the brand claim is a
+   sentence, so it reads like one. `.lede` is added and removed as the
+   heading changes, because a live session's meta *is* a label again. */
+.meta.lede {
+  text-transform: none; letter-spacing: normal;
+  font: var(--t-body); color: var(--ink-3);
+  max-width: 54ch; margin-top: 2px;
 }

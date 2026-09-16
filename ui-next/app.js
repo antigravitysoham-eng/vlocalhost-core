@@ -86,6 +86,13 @@ function meter(on) {
 }
 
 /* -------------------------------------------------------------- recording */
+/* The line the site leads with. Idle is the only time there is room for the
+ * claim the whole product rests on, so it goes here rather than "Ready to
+ * record", which says nothing a person did not already know. A live session
+ * replaces it with the meeting's own title; a *finished* one must not. */
+const IDLE_TITLE = 'Your meetings never leave this machine.';
+const IDLE_META = 'Nothing is uploaded. No account, and no bot in the call.';
+
 const recordBtn = $('#record');
 const lines = $('#lines');
 let recording = false, t0 = 0, clock = null, spoken = 0;
@@ -126,6 +133,7 @@ function start() {
   lines.replaceChildren();
   /* The source cannot change under a running capture, so the control says so
      by going unavailable rather than by accepting a change and ignoring it. */
+  $('#rec-meta').classList.remove('lede');   // a live session's meta is a label
   $$('[data-setting="CAPTURE_MODE"]').forEach(c => (c.disabled = true));
   recordBtn.textContent = '■ Stop & save';
   recordBtn.classList.replace('primary', 'stop');
@@ -148,7 +156,8 @@ function stop() {
   const secs = Math.max(1, Math.floor((Date.now() - t0) / 1000));
   recordBtn.textContent = '● Start recording';
   recordBtn.classList.replace('stop', 'primary');
-  $('#rec-title').textContent = 'Ready to record';
+  $('#rec-title').textContent = IDLE_TITLE;
+  $('#rec-meta').classList.remove('lede');
   $('#rec-meta').textContent = 'Saved. Summarizing below — you can start the next meeting now.';
   $('#live-text').textContent = 'Idle · 0 bytes out';
   $('#gate').textContent = 'Silence gated · nothing transcribed yet';
@@ -935,16 +944,17 @@ const live = {
 
   async loadLibrary() {
     const list = await api().library(200);
-    libraryRows.replaceChildren();
-    /* rowFor prepends, so the newest has to go in last. */
-    for (const r of [...list].reverse()) {
+    libRows = [];
+    for (const r of list) {
       const m = {
         base: r.base, title: r.title, at: Date.parse(r.modified) || Date.now(),
         duration: null, state: 'ready', summary: !!r.summary, notes: null,
       };
       meetings.push(m);
-      rowFor(m, libraryRows);
+      libRows.push(m);
     }
+    wireLibraryFilter();
+    drawLibrary();
     tally(list);
   },
 
@@ -985,7 +995,7 @@ const live = {
 /* One place where a failure lands, so a broken start cannot leave the button
    saying "Stop & save" over a microphone that was never opened. */
 function fail(message) {
-  $('#rec-title').textContent = 'Ready to record';
+  $('#rec-title').textContent = IDLE_TITLE;
   $('#gate').textContent = message;
   if (recording) {
     recording = false;
@@ -1289,6 +1299,7 @@ function realLevel(db, speech) {
   if (!realMeter) { realMeter = true; clearInterval(level); wave.classList.remove('idle'); }
 
   const unit = Math.max(0, Math.min(1, (db + 60) / 60));
+  logoLevel(speech ? unit : unit * 0.25);   // the mark answers the room
   const height = 6 + Math.pow(unit, 0.6) * 88;
 
   /* Shift left by one and put the newest at the right, so the bar scrolls with
@@ -1315,6 +1326,7 @@ function realLevel(db, speech) {
 const _stopWasCalled = stop;
 stop = function () {                                        // eslint-disable-line
   realMeter = false;
+  logoLevel(0);
   return _stopWasCalled.apply(this, arguments);
 };
 
@@ -1840,4 +1852,112 @@ function interim(text, who) {
   lines.append(row);
   row.scrollIntoView({ block: 'nearest' });
   $('#gate').textContent = `Hearing · ${sourceLabel()}`;
+}
+
+/* =============================================== the logo, while listening = *
+ *
+ * `--lvl` on the root, 0..1, from the same reports the meter draws. The mark
+ * in the chrome bar scales and glows off it, so the thing that moves is the
+ * room's actual loudness and not a timer. Set back to 0 the moment a session
+ * ends: an app that keeps pulsing after you pressed Stop is telling you it is
+ * still listening, which would be a lie.
+ */
+function logoLevel(unit) {
+  document.documentElement.style.setProperty('--lvl', (unit || 0).toFixed(3));
+}
+
+/* ==================================================== library: filtering === *
+ *
+ * A range and a full-notes toggle. Both are view state and neither is saved:
+ * a filter that survives a restart is a filter somebody forgets they set and
+ * then reports as "my meetings are gone".
+ */
+const RANGES = [
+  ['all', 'All'],
+  ['7', 'Last 7 days'],
+  ['30', 'Last 30 days'],
+  ['today', 'Today'],
+];
+let libRange = 'all';
+let libFull = false;
+let libRows = [];
+
+function withinRange(when) {
+  if (libRange === 'all') return true;
+  const now = new Date();
+  const d = new Date(when);
+  if (libRange === 'today') return d.toDateString() === now.toDateString();
+  return (now - d) <= Number(libRange) * 864e5;
+}
+
+function drawLibrary() {
+  libraryRows.replaceChildren();
+  const shown = libRows.filter(r => withinRange(r.at));
+  /* rowFor prepends, so the newest has to go in last. */
+  for (const m of [...shown].reverse()) rowFor(m, libraryRows);
+  if (libFull) for (const m of shown) showFull(m);
+
+  const box = $('#library-filter');
+  if (box) box.hidden = !libRows.length;
+  const count = $('#library-count');
+  if (count) {
+    count.textContent = shown.length === libRows.length
+      ? '' : `${shown.length} of ${libRows.length}`;
+  }
+  const empty = $('#library-empty');
+  if (empty && libRows.length) {
+    empty.hidden = shown.length > 0;
+    if (!shown.length) {
+      empty.replaceChildren(
+        el('strong', null, 'Nothing in that range.'),
+        document.createTextNode('You have ' + libRows.length
+          + ' meeting' + (libRows.length === 1 ? '' : 's') + ' in all.'));
+    }
+  }
+}
+
+/* The notes as the file has them. Asked for once per meeting and kept, so
+ * toggling the switch twice does not re-read the disk twice. */
+async function showFull(m) {
+  if (!m._row) return;
+  if (m._row.querySelector('.full')) return;
+  const box = el('div', 'full', 'Reading…');
+  m._row.append(box);
+  try {
+    const got = await api().meeting(m.base);
+    const text = (got && (got.notes || got.summary || '')).trim();
+    if (text) { box.textContent = text; box.classList.remove('empty'); }
+    else {
+      box.classList.add('empty');
+      box.textContent = 'No notes were written for this meeting — the '
+        + 'transcript is still in the folder.';
+    }
+  } catch (e) {
+    box.classList.add('empty');
+    box.textContent = 'Could not read the notes: ' + e;
+  }
+}
+
+function wireLibraryFilter() {
+  const host = $('#library-range');
+  if (!host) return;
+  host.replaceChildren();
+  for (const [value, label] of RANGES) {
+    const chip = el('button', 'chip', label);
+    chip.type = 'button';
+    chip.setAttribute('role', 'radio');
+    chip.setAttribute('aria-checked', String(libRange === value));
+    chip.onclick = () => {
+      libRange = value;
+      $$('.chip', host).forEach(c => c.setAttribute(
+        'aria-checked', String(c.textContent === label)));
+      drawLibrary();
+    };
+    host.append(chip);
+  }
+  const toggle = $('#library-expand');
+  if (toggle) {
+    toggle.checked = libFull;
+    toggle.onchange = () => { libFull = toggle.checked; drawLibrary(); };
+  }
 }

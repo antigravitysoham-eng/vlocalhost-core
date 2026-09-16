@@ -77,8 +77,8 @@
       <!-- ============================================ RECORDING ========== -->
       <section class="screen" id="screen-record">
         <span class="pill live" id="live-pill"><b></b><span id="live-text">Idle · 0 bytes out</span></span>
-        <h1 class="h" id="rec-title">Ready to record</h1>
-        <div class="meta" id="rec-meta">No session</div>
+        <h1 class="h" id="rec-title">Your meetings never leave this machine.</h1>
+        <div class="meta lede" id="rec-meta">Nothing is uploaded. No account, and no bot in the call.</div>
 
         <!-- The meter is the page. -->
         <div class="wave" id="wave" role="img" aria-label="Input level meter"></div>
@@ -207,6 +207,14 @@
           Press Start on the Recording screen. Each meeting is saved here as two
           plain files — the transcript and the notes — in a folder you can open,
           copy or delete without this app.
+        </div>
+        <div class="libfilter" id="library-filter" hidden>
+          <div class="chips" id="library-range" role="radiogroup" aria-label="Show"></div>
+          <span class="libcount" id="library-count"></span>
+          <label class="libfull">
+            <input type="checkbox" id="library-expand">
+            <span>Show the full notes</span>
+          </label>
         </div>
         <div class="rowlist" id="library-rows"></div>
       </section>
