@@ -787,3 +787,28 @@ body {
   font: var(--t-body); color: var(--ink-3);
   max-width: 54ch; margin-top: 2px;
 }
+
+/* --------------------------------------------------- appearance toggle -- *
+ * Pushed to the right of the chrome bar. Quiet: it is a preference, not an
+ * action, and it must not compete with the record button for attention.     */
+.appear {
+  margin-left: auto;
+  width: 30px; height: 26px;
+  display: grid; place-items: center;
+  font-size: 14px; line-height: 1;
+  color: var(--ink-3);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.appear:hover { color: var(--ink); border-color: var(--line-2); background: var(--paper); }
+.appear:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+/* The toggle says what it will do, in words. A lone half-moon glyph is a
+   guess -- people click it to find out, which is a poor way to learn that an
+   app has a light mode at all. */
+.appear-wrap { margin-left: auto; display: flex; align-items: center; gap: var(--s2); }
+.appear-note { font: var(--t-label); letter-spacing: .04em; color: var(--ink-4); white-space: nowrap; }
+.appear { margin-left: 0; }
+@media (max-width: 860px) { .appear-note { display: none; } }

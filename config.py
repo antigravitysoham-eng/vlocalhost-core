@@ -242,6 +242,21 @@ NOTES_LANGUAGE = "en"
 # Leave as None to use faster-whisper with the settings above.
 CUSTOM_TRANSCRIBER = None
 
+# --- Appearance ----------------------------------------------------------
+# "system", "light" or "dark".
+#
+# `dark-mode.md` warns against an app-specific appearance setting -- "they may
+# think your app is broken because it doesn't respond to their systemwide
+# appearance choice" -- and that is why this shipped following the OS and
+# nothing else. The guidance assumes a platform whose users know where the
+# system toggle is. On Windows most do not, and the request came back twice.
+#
+# "system" is the default, so the guidance still holds for anyone who never
+# touches it: the app follows the OS out of the box. The other two are an
+# override for somebody who has decided, which is a different thing from an
+# app that ignores the OS by default.
+APPEARANCE = "system"
+
 # --- Who the notes are for -----------------------------------------------
 # Optional, and empty out of the box. Asked once on first run and changeable
 # in Settings; both are free for the user to leave blank, and everything works

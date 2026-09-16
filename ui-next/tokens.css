@@ -111,7 +111,7 @@
  * the flags in shell.py. All four were one affordance and they left together.
  */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-appearance="light"]) {
     --paper:   #0B0D13;
     --paper-2: #141821;
     --wash:    #10131B;
@@ -152,3 +152,62 @@
     --glow: 0;
   }
 }
+
+
+/* An explicit choice, from the toggle in the chrome bar. `data-appearance` is
+   set on <html> from the APPEARANCE setting; absent means "system", which is
+   the default and the only state the media query above decides alone.
+
+   `color-scheme` has to be re-declared or the native controls keep following
+   the OS while the tokens follow the choice -- on a dark machine, choosing
+   light drew a light page with dark radio buttons and a dark slider track. It
+   is not implied by changing a custom property. */
+:root[data-appearance="light"] { color-scheme: light; }
+:root[data-appearance="dark"]  { color-scheme: dark; }
+
+:root[data-appearance="dark"] {
+    --paper:   #0B0D13;
+    --paper-2: #141821;
+    --wash:    #10131B;
+
+    --ink:   #ECEEF4;   /* 14.9:1 on paper-2 */
+    --ink-2: #B4BBCB;   /*  8.2:1 */
+    --ink-3: #8F98AC;   /*  5.3:1 */
+    --ink-4: #828BA0;   /*  4.6:1 */
+
+    --line:   rgba(236, 238, 244, .09);
+    --line-2: rgba(236, 238, 244, .16);
+
+    /* On a dark ground the bright brand values are already legible, so the
+       text tokens go back up rather than down. */
+    --amber-text: #FFC163;
+    --amber-on-soft: #FFC163;
+    --amber-soft: rgba(255, 180, 61, .14);
+    --mint-text: #4FE3D1;
+    --mint-on-soft: #4FE3D1;
+    --mint-soft: rgba(56, 225, 206, .12);
+    --lilac-text: #A99BF7;
+    --lilac-soft: rgba(139, 124, 240, .16);
+    --risk-text: #FF8A94;
+
+    --shadow:    0 1px 2px rgba(0, 0, 0, .5), 0 12px 32px -12px rgba(0, 0, 0, .7);
+    --shadow-lg: 0 2px 4px rgba(0, 0, 0, .5), 0 40px 80px -32px rgba(0, 0, 0, .9);
+    --glow: .30;
+}
+
+
+/* ---------------------------------------------------------- the wash ---- *
+ * The amber-lilac-mint aurora is the brand and it is present in every
+ * appearance. It was being read at .30 under an explicit light choice -- the
+ * dark value, and backwards: a pale ground needs *more* glow for the amber to
+ * register at all. Stated per appearance, last, so nothing above can leak
+ * into the wrong one.
+ *
+ * `prefers-contrast: more` is the one thing still allowed to retire it, and
+ * that is a stated accessibility choice rather than a theme.                */
+:root { --glow: .55; }
+:root[data-appearance="dark"] { --glow: .34; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-appearance="light"]) { --glow: .34; }
+}
+@media (prefers-contrast: more) { :root { --glow: 0; } }

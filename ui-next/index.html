@@ -57,6 +57,15 @@
       </g>
     </svg>
     <span class="t" id="chrome-title">Vlocalhost AI</span>
+    <!-- Appearance. Three states, not two: "System" is the default and keeps
+         dark-mode.md's rule that an app answers the systemwide choice. The
+         other two are for somebody who has decided. One cycling button rather
+         than three, because it lives in a 44px chrome bar. -->
+    <span class="appear-wrap">
+      <span class="appear-note" id="appearance-note">Follows Windows</span>
+      <button class="appear" id="appearance" type="button"
+              title="Appearance" aria-label="Appearance: system"></button>
+    </span>
   </div>
 
   <div class="shell">
@@ -803,9 +812,32 @@
              rules that decide what goes in the notes sit after them in the
              prompt and stay absolute. Blank is a valid answer and turns the
              whole thing off. -->
-        <div class="grp">
-          <h2 class="grp-h">You</h2>
-          <div class="fields">
+        <div class="sect">
+          <button class="disclose" aria-expanded="true" aria-controls="s-appearance">
+            <span class="tri" aria-hidden="true">▶</span> Appearance
+          </button>
+          <div class="body-in form" id="s-appearance">
+            <div class="field">
+              <label for="set-appearance">Theme</label>
+              <div class="ctl">
+                <select id="set-appearance" class="sel" data-setting="APPEARANCE">
+                  <option value="system">Follow the system</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+                <p class="hint">The same choice as the toggle at the top of the
+                  window. "Follow the system" is the default, so the app answers
+                  your OS setting unless you say otherwise.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sect">
+          <button class="disclose" aria-expanded="true" aria-controls="s-you">
+            <span class="tri" aria-hidden="true">▶</span> You
+          </button>
+          <div class="body-in form" id="s-you">
             <div class="field">
               <label for="set-user-field">Area of work</label>
               <div class="ctl">
@@ -845,9 +877,11 @@
              nothing here is saved, each one does something now and says what
              happened. Every handler calls a Core module, so this window and
              the old one cannot disagree about the machine they are on. -->
-        <div class="grp">
-          <h2 class="grp-h">This machine</h2>
-          <div class="fields">
+        <div class="sect">
+          <button class="disclose" aria-expanded="true" aria-controls="s-machine-actions">
+            <span class="tri" aria-hidden="true">▶</span> This machine
+          </button>
+          <div class="body-in form" id="s-machine-actions">
 
             <div class="field">
               <label>Version</label>

@@ -968,6 +968,7 @@ const live = {
       else if (node.type === 'radio') node.checked = (node.value === String(v));
       else node.value = v === null ? '' : String(v);
     }
+    if (values.APPEARANCE) { appearance = values.APPEARANCE; paintAppearance(); }
     $('#thresh-out').textContent = Number($('#set-thresh').value).toFixed(2);
     sourceControls.forEach(o => (o.value = values.CAPTURE_MODE || 'both'));
     applyDelivery(); applyHotkey();
@@ -1961,3 +1962,59 @@ function wireLibraryFilter() {
     toggle.onchange = () => { libFull = toggle.checked; drawLibrary(); };
   }
 }
+
+/* ================================================== appearance toggle ==== *
+ *
+ * Three states and System is the default, which is the part that matters.
+ * `dark-mode.md` warns that an app ignoring the systemwide choice reads as
+ * broken -- and out of the box this one still answers it. What the toggle adds
+ * is an override for somebody who has decided, on a platform where most people
+ * never find the OS setting.
+ *
+ * The choice is written to settings like any other, so it survives a restart
+ * and is visible in Settings rather than being a hidden preference only this
+ * button knows about.
+ */
+const APPEARANCES = [
+  ['system', '◐', 'System'],
+  ['light', '☀', 'Light'],
+  ['dark', '☾', 'Dark'],
+];
+let appearance = 'system';
+
+function paintAppearance() {
+  const [value, glyph, label] = APPEARANCES.find(a => a[0] === appearance) || APPEARANCES[0];
+  const root = document.documentElement;
+  if (value === 'system') root.removeAttribute('data-appearance');
+  else root.dataset.appearance = value;
+  const note = $('#appearance-note');
+  if (note) {
+    /* Name the platform rather than saying "System": somebody who does not
+       know their OS has an appearance setting learns it here. */
+    const os = navigator.platform && /Mac/i.test(navigator.platform) ? 'macOS'
+      : navigator.platform && /Linux/i.test(navigator.platform) ? 'your system'
+      : 'Windows';
+    note.textContent = value === 'system' ? `Follows ${os}`
+      : value === 'light' ? 'Light' : 'Dark';
+  }
+  const sel = $('#set-appearance');
+  if (sel && sel.value !== value) sel.value = value;
+  const btn = $('#appearance');
+  if (btn) {
+    btn.textContent = glyph;
+    btn.title = `Appearance: ${label} — click to change`;
+    btn.setAttribute('aria-label', `Appearance: ${label}`);
+  }
+}
+
+if ($('#appearance')) {
+  $('#appearance').onclick = () => {
+    const i = APPEARANCES.findIndex(a => a[0] === appearance);
+    appearance = APPEARANCES[(i + 1) % APPEARANCES.length][0];
+    paintAppearance();
+    /* Saved, not remembered in a variable: a preference that vanishes on
+     * restart is one the user has to set every single launch. */
+    if (LIVE) api().settings_set({ APPEARANCE: appearance }).catch(() => {});
+  };
+}
+paintAppearance();

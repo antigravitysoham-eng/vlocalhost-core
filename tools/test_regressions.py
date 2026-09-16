@@ -364,11 +364,45 @@ def review_affordances_are_not_in_the_build():
     js = read("ui-next", "app.js")
     for needle in ("location.search", "START_SCREEN", "START_ASK"):
         assert needle not in js, f"{needle} is back in app.js"
-    assert ":root[data-appearance" not in read("ui-next", "tokens.css"), \
-        "the appearance override is back in tokens.css"
     shell = strip_docstrings(read("ui-next", "shell.py"))
     assert "--appearance=" not in shell and "--screen=" not in shell, \
         "the review flags are back in shell.py"
+
+
+@case("I cannot find a light mode, and the app ignores my system setting")
+def appearance_is_a_real_setting():
+    """The query-string override went out with the review affordances, which
+    left no way to choose at all. dark-mode.md is satisfied by *defaulting* to
+    the system, not by refusing to offer a choice -- so APPEARANCE is a stored
+    setting with three states and System first.
+    """
+    import config
+    import settings
+    assert getattr(config, "APPEARANCE", None) == "system", \
+        "the default is no longer 'system'; the app must answer the OS first"
+    assert "APPEARANCE" in settings.EDITABLE, "the choice cannot be saved"
+    css = read("ui-next", "tokens.css")
+    for sel in (':root[data-appearance="light"]', ':root[data-appearance="dark"]'):
+        assert sel in css, sel + " is gone; the toggle cannot do anything"
+    html = read("ui-next", "index.html")
+    assert 'id="appearance"' in html, "the toggle is not in the window"
+    assert 'id="appearance-note"' in html, "the toggle has no label beside it"
+
+
+@case("The amber wash disappears in one of the themes")
+def the_brand_wash_survives_every_appearance():
+    """The aurora is the brand, not decoration. It was reading the *dark* glow
+    value under an explicit light choice -- backwards, since a pale ground
+    needs more glow for the amber to register at all. Each appearance states
+    its own, last in the file, so nothing above can leak into the wrong one.
+    """
+    css = read("ui-next", "tokens.css")
+    tail = css[css.index("the wash"):]
+    assert ":root { --glow: .55; }" in tail, "light no longer states its own glow"
+    assert '[data-appearance="dark"] { --glow:' in tail, \
+        "dark no longer states its own glow"
+    assert "prefers-contrast: more" in tail, \
+        "high contrast can no longer retire the wash"
 
 
 def main(argv=None):
