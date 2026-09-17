@@ -834,6 +834,30 @@
         </div>
 
         <div class="sect">
+          <button class="disclose" aria-expanded="true" aria-controls="s-vocab">
+            <span class="tri" aria-hidden="true">▶</span> Your vocabulary
+          </button>
+          <div class="body-in form" id="s-vocab">
+            <div class="field">
+              <label for="set-glossary">Words to expect</label>
+              <div class="ctl">
+                <textarea id="set-glossary" class="input wide" rows="5"
+                          placeholder="One per line&#10;Helius&#10;BFSI&#10;Chanakya"
+                          data-setting="GLOSSARY"></textarea>
+                <p class="hint">Names, products, clients, acronyms — the words a
+                  general speech model has never met. They are handed to the
+                  recogniser before it listens, so it expects them.</p>
+                <p class="note">Nothing is uploaded and the model is not
+                  changed. Delete a line and it is gone from the next recording.
+                  The first <b>16</b> are used — measured as the point past
+                  which transcription slows sharply, so put the ones that matter
+                  at the top.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sect">
           <button class="disclose" aria-expanded="true" aria-controls="s-you">
             <span class="tri" aria-hidden="true">▶</span> You
           </button>

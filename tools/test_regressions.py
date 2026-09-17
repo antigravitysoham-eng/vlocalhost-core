@@ -411,6 +411,37 @@ def the_brand_wash_survives_every_appearance():
         "high contrast can no longer retire the wash"
 
 
+@case("Transcription got much slower after I added my word list")
+def the_glossary_cap_stays_behind_the_cliff():
+    """Handing the recogniser hotwords is free up to about sixteen terms and
+    then falls off a cliff -- measured, medians of interleaved runs on the same
+    audio: 16 terms 0.99x, 24 terms 2.76x, 120 terms 5.21x.
+
+    This app already waits 800ms of silence plus a decode before a line
+    appears. Tripling the decode would undo every latency argument the window
+    makes, so the cap is a wall rather than a preference. Hallucination is not
+    what limits it -- ten decoys planted in audio containing none of them were
+    heard zero times at 10 terms and at 200.
+    """
+    import config
+    import transcriber
+    cap = getattr(config, "GLOSSARY_MAX_TERMS", 0)
+    assert 0 < cap <= 20, (
+        f"cap is {cap}; past ~16 terms the decode is 2.5x slower or worse. "
+        "Re-measure with tools/bench_glossary.py before raising it.")
+
+    keep = config.GLOSSARY
+    try:
+        config.GLOSSARY = ""
+        assert transcriber.glossary_terms() == [],             "an empty glossary must hand over nothing at all, not an empty hint"
+        config.GLOSSARY = chr(10).join(f"Term{i}" for i in range(cap + 30))
+        assert len(transcriber.glossary_terms()) == cap, "the cap is not applied"
+        config.GLOSSARY = chr(10).join(["Helius", "helius", "", "  Helius  ", "BFSI"])
+        assert transcriber.glossary_terms() == ["Helius", "BFSI"],             "duplicates and blank lines are reaching the decoder"
+    finally:
+        config.GLOSSARY = keep
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--app", help="a built bundle's app/ directory")

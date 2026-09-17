@@ -62,6 +62,7 @@ EDITABLE = (
     # Who the notes are for. Editable so Settings can change what first-run
     # asked, and so a change applies to the next meeting with nothing rebuilt.
     "APPEARANCE",
+    "GLOSSARY",
     "USER_ASKED",
     "USER_FIELD",
     "USER_TONE",

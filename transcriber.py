@@ -27,6 +27,30 @@ _HALLUCINATIONS = {
 }
 
 
+def glossary_terms():
+    """The words this machine should expect, capped and de-duplicated.
+
+    One per line in ``config.GLOSSARY``. Blank lines and duplicates go; order
+    is kept, because the first terms are the ones a user typed deliberately
+    and later ones tend to be harvested.
+
+    Returns ``[]`` when nothing is set, and the caller then passes no hotwords
+    at all rather than an empty string -- an empty hint is not the same as no
+    hint, and only one of them leaves the decode byte-identical to before this
+    existed.
+    """
+    raw = getattr(config, "GLOSSARY", "") or ""
+    seen, out = set(), []
+    for line in raw.splitlines():
+        term = line.strip()
+        if not term or term.lower() in seen:
+            continue
+        seen.add(term.lower())
+        out.append(term)
+    cap = int(getattr(config, "GLOSSARY_MAX_TERMS", 60) or 0)
+    return out[:cap] if cap else out
+
+
 def build_transcriber():
     """Return the configured speech-to-text engine.
 
@@ -238,6 +262,11 @@ class FasterWhisperTranscriber:
         # int16 PCM -> float32 in [-1, 1], which is what whisper expects.
         audio = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
 
+        # Space-joined: faster-whisper takes one string and tokenises it. A
+        # provisional decode gets them too -- the guess on screen should not
+        # spell a name differently from the line that replaces it.
+        hotwords = " ".join(glossary_terms())
+
         segments, info = model.transcribe(
             audio,
             # None = detect this utterance's language on its own.
@@ -249,6 +278,14 @@ class FasterWhisperTranscriber:
             condition_on_previous_text=False,
             no_speech_threshold=0.6,
             without_timestamps=partial,
+            # The words this machine expects to hear. Nothing is sent
+            # anywhere and the model is unchanged -- these bias *this* decode
+            # toward names it has never met, which is the whole reason a
+            # colleague's surname comes out right.
+            #
+            # Omitted entirely when the glossary is empty, so the default
+            # install decodes exactly as it did before this existed.
+            **({"hotwords": hotwords} if hotwords else {}),
         )
         if not partial:
             self.last_language = getattr(info, "language", None)

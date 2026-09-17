@@ -242,6 +242,51 @@ NOTES_LANGUAGE = "en"
 # Leave as None to use faster-whisper with the settings above.
 CUSTOM_TRANSCRIBER = None
 
+# --- Your vocabulary -----------------------------------------------------
+# Words this machine should expect to hear: product names, colleagues, clients,
+# acronyms -- the things a general speech model mangles because it has never
+# met them.
+#
+# **This is not training.** Nothing about the model changes. The terms are
+# handed to the recogniser before it decodes, as `hotwords`, which biases it
+# toward hearing them. That distinction matters and it is not pedantry: it is
+# why this applies to the very next sentence instead of after an hour of GPU,
+# why it is reversible by deleting a line, and why "we learn your vocabulary,
+# not your voice" is a true sentence rather than a careful one.
+#
+# One term per line. Empty is the default and passes nothing at all, so a user
+# who never opens this gets exactly the transcription they got before.
+GLOSSARY = ""
+
+#: How many terms reach the recogniser. A cap, not a preference, and the
+#: number is measured rather than chosen -- 60 was a guess and it was wrong by
+#: four times.
+#:
+#: Decode cost against an empty glossary, same 33s of audio, medians of
+#: interleaved runs so machine drift hits every size equally:
+#:
+#:      terms   decode   vs empty
+#:          0     4.2s      1.00x
+#:          8     4.1s      0.98x
+#:         16     4.1s      0.99x
+#:         24    11.5s      2.76x     <- the cliff
+#:         40    10.2s      2.45x
+#:        120    21.5s      5.21x
+#:
+#: Free to about sixteen and then it falls off. That is not a curve to tune
+#: along, it is a wall to stay behind: this app already waits 800ms of silence
+#: plus a decode before a line appears, and tripling the decode would undo
+#: every latency argument the window makes.
+#:
+#: Hallucination, the other half of the trade, turned out not to be the binding
+#: constraint -- ten plausible decoys planted in audio containing none of them
+#: were heard zero times, at 10 terms and at 200. Speed is what limits this.
+#:
+#: The glossary itself may be as long as the user likes. This decides how many
+#: of them are handed over, so the list wants to be ordered with the most
+#: valuable first. See tools/bench_glossary.py to re-measure on other hardware.
+GLOSSARY_MAX_TERMS = 16
+
 # --- Appearance ----------------------------------------------------------
 # "system", "light" or "dark".
 #
