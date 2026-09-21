@@ -20,13 +20,17 @@ $$('.screen').forEach(s => (screens[s.id.replace('screen-', '')] = s));
 
 function show(name) {
   Object.entries(screens).forEach(([k, s]) => (s.hidden = k !== name));
-  $$('.nav button').forEach(b => {
+  /* [data-screen] matters: the sidebar also holds the appearance and blur
+     buttons, and they name no screen. Without the attribute in the selector a
+     click on either called show(undefined), which hid every screen and left
+     the content panel blank. */
+  $$('.nav button[data-screen]').forEach(b => {
     const on = b.dataset.screen === name;
     on ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current');
   });
   $('#body').scrollTop = 0;
 }
-$$('.nav button').forEach(b => b.addEventListener('click', () => show(b.dataset.screen)));
+$$('.nav button[data-screen]').forEach(b => b.addEventListener('click', () => show(b.dataset.screen)));
 $('#back').addEventListener('click', () => show('library'));
 
 /* ------------------------------------------------------------ disclosure */
