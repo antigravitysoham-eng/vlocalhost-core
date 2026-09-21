@@ -35,3 +35,10 @@ recording.lock
 .idea/
 .DS_Store
 Thumbs.db
+
+# The Aurora Glass design preview: the design component as it came from Claude
+# Design, plus React and Babel vendored so the preview window makes no network
+# request. It is a review tool, not part of the app -- and `copy_app()` copies
+# every root-level .py and every directory in INCLUDE_DIRS, so anything left
+# loose here would ship inside the bundle.
+_preview/
