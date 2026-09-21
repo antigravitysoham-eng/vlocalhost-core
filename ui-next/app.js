@@ -2115,12 +2115,38 @@ paintAppearance();
   const IDLE = 'Nothing is captured until you press record.';
 
   /* The newest settled line, and the tail that is still being decoded. */
+  /* The engine hands the page a whole formatted line -- "[22:27:29] You (en):
+     two, three, four" -- and the transcript below wants every part of that.
+     The stage wants the sentence: it is set in 24px and the timestamp and the
+     speaker are already on screen, in the meta line and in the transcript. The
+     prefix is only removed when it really is one: a bracketed clock, and then
+     at most a few words before the colon, so a sentence that happens to
+     contain a colon keeps all of itself. */
+  const STAMP = /^\[\d{2}:\d{2}:\d{2}\]\s*/;
+  const NAME = /^([^:]{1,32}):\s*/;
+  /* A speaker label looks like a name: a word or three, each capitalised, with
+     the transcriber's optional "(en)" tag allowed after it. Anything else is
+     the sentence itself -- "the plan is this: we ship Friday" keeps its opening
+     clause, which a bare "text before the first colon" rule would eat. */
+  const isName = (s) => {
+    const bare = s.replace(/\s*\([a-z]{2,3}\)\s*$/i, '').trim();
+    const words = bare.split(/\s+/);
+    return bare && words.length <= 3 && !/[.!?,;]/.test(bare)
+        && words.every(w => w[0] === w[0].toUpperCase() && /[A-Za-z]/.test(w[0]));
+  };
+  const spoken = (node) => {
+    let t = (node.textContent || '').trim().replace(STAMP, '');
+    const m = NAME.exec(t);
+    if (m && isName(m[1])) t = t.slice(m[0].length);
+    return t.trim();
+  };
+
   const mirror = () => {
     const finals = [...linesEl.querySelectorAll('.ln:not(.interim):not(.hint) p')];
     const last = finals[finals.length - 1];
     const guess = linesEl.querySelector('.ln.interim p');
-    said.textContent = last ? last.textContent.trim() : IDLE;
-    prov.textContent = guess ? guess.textContent.trim() : '';
+    said.textContent = last ? spoken(last) || IDLE : IDLE;
+    prov.textContent = guess ? spoken(guess) : '';
   };
   new MutationObserver(mirror).observe(linesEl, { childList: true, subtree: true, characterData: true });
 
