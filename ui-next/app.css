@@ -812,3 +812,439 @@ body {
 .appear-note { font: var(--t-label); letter-spacing: .04em; color: var(--ink-4); white-space: nowrap; }
 .appear { margin-left: 0; }
 @media (max-width: 860px) { .appear-note { display: none; } }
+
+
+/* ================================================= the glass shell ========
+ * Aurora Glass, ported onto the shell that is already here. The markup did not
+ * need rewriting: `.sky` is the wash, `.app` the window, `nav.nav` the sidebar,
+ * `#body` the content panel. Only their surfaces change.
+ *
+ * Exactly two blurred regions, and they never nest: the sidebar and the content
+ * panel. `.chrome` is deliberately not one — it spans the full width, so
+ * blurring it would put a third blurred layer above the other two. It goes
+ * transparent and lets the wash through instead.
+ *
+ * Appended rather than edited in place, so every rule above still reads as it
+ * was written and this layer can be lifted out in one piece.              */
+.app { background: var(--bg); color: var(--ink1); }
+
+/* The wash: three drifting blobs, blurred once, on static elements. The
+   radius is never animated -- only the transform, and only at 40s, because
+   a blur that changes every frame is the one thing that makes a window stutter
+   while the machine is busy transcribing. */
+.sky b {
+  filter: blur(74px);
+  opacity: calc(var(--glow) * 1.6);
+  animation: vh-drift 40s ease-in-out infinite;
+}
+.sky b:nth-child(1) { background: var(--w2); }
+.sky b:nth-child(2) { background: var(--w3); }
+.sky b:nth-child(3) { background: var(--w1); }
+@keyframes vh-drift {
+  50%  { transform: translate3d(2%, -1.5%, 0) scale(1.06); }
+  100% { transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .sky b { animation: none; } }
+
+/* The band. Same 44px the design reserves, and no surface of its own. */
+.chrome {
+  height: 44px; padding: 0 var(--s4);
+  background: transparent; border-bottom: 0;
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+
+/* Blurred region one. */
+.nav {
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(var(--sat));
+  backdrop-filter: blur(var(--blur)) saturate(var(--sat));
+  border-right: 1px solid var(--hair);
+  padding: 0 10px 12px;
+}
+.nav .g { color: var(--ink3); padding: 0 10px; }
+.nav button { color: var(--ink1); border-radius: 8px; padding: 0 10px; min-height: 30px; }
+.nav button:hover { background: var(--btn); }
+.nav button[aria-current="page"] { background: var(--glass-strong); box-shadow: none; }
+
+/* Blurred region two. The panel is inset from the window rather than flush, so
+   the wash reads at the edges and the corners -- which is the whole reason the
+   ground is there. 22px inside, one value, every screen. */
+.body {
+  margin: 0 12px 12px; padding: 22px;
+  border-radius: 16px;
+  background: var(--panel);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(var(--sat));
+  backdrop-filter: blur(var(--blur)) saturate(var(--sat));
+  border: 1px solid var(--edge);
+  box-shadow: var(--sh1);
+}
+
+/* Below the sidebar's breakpoint the panel loses its side inset: at that width
+   the wash showing down both edges costs more than it gives. */
+@media (max-width: 860px) {
+  .body { margin: 0; border-radius: 0; border: 0; box-shadow: none; }
+}
+
+
+/* ===================================================== the capture stage ==
+ * The one opaque surface in the window, in both appearances. It carries the
+ * meter and the sentence being spoken, and a translucent ground under moving
+ * type is where contrast and compositing cost fail at once -- so it is solid,
+ * it is never blurred, and it never overlaps the two blurred regions.       */
+/* :not([hidden]) matters. A bare `#screen-record { display:flex }` outranks the
+   UA's `[hidden] { display:none }`, so the stage stayed on screen behind every
+   other screen -- and an `x.hidden` test still reported it hidden, which is how
+   it passed a check and failed the eye. */
+#screen-record:not([hidden]) { display: flex; flex-direction: column; gap: var(--s4); min-height: 0; }
+
+.stage {
+  position: relative; display: flex; flex-direction: column;
+  background: var(--stage); color: var(--stage-ink);
+  border-radius: 16px; padding: 20px 22px;
+  min-height: 300px;
+}
+/* flex:1 needs something to fill. The screen is a content-height block inside
+   a scrolling panel, so "full" gives it the panel's height first. */
+#screen-record[data-stage="full"]:not([hidden]) { height: 100%; }
+#screen-record[data-stage="full"] .stage { flex: 1; }
+#screen-record[data-stage="full"] .under { display: none; }
+
+.stage-head { display: flex; align-items: flex-start; gap: var(--s3); flex: none; }
+.stage-id { flex: 1; min-width: 0; }
+.stage .h { font: 600 17px/1.25 var(--f); color: var(--stage-ink); margin: 0; letter-spacing: -.01em; }
+.stage .meta { color: var(--stage-ink2); font: var(--t-data); margin-top: 4px; }
+.stage .pill { background: rgba(245,242,238,.08); color: var(--stage-ink2); box-shadow: none; }
+.stage .pill b { background: currentColor; }
+
+.stage-toggle {
+  flex: none; width: 26px; height: 26px; border: 0; border-radius: 8px; cursor: pointer;
+  background: rgba(245,242,238,.08); color: var(--stage-ink2); font-size: 12px; line-height: 1;
+}
+.stage-toggle { font-family: var(--f); }
+.stage-toggle:hover { background: rgba(245,242,238,.14); }
+
+/* The meter, given the room the design gives it. */
+.stage-mid { flex: 1; display: flex; flex-direction: column; align-items: center;
+             justify-content: center; gap: 34px; min-height: 0; padding: 18px 0; }
+.stage .wave { width: 100%; max-width: 620px; height: 120px; display: flex;
+               align-items: center; justify-content: center; gap: 9px; }
+#screen-record[data-stage="full"] .stage .wave { height: 190px; gap: 13px; }
+.stage .wave i {
+  flex: none; width: 11px; border-radius: 6px; background: rgba(245,242,238,.78);
+  transition: height .09s linear;
+}
+#screen-record[data-stage="full"] .stage .wave i { width: 15px; }
+.stage .wave.idle i { background: var(--stage-ink3); height: 8px !important; }
+@media (prefers-reduced-motion: reduce) { .stage .wave i { transition: none; } }
+
+/* What is being said. The tail is under the contrast floor on purpose: it is
+   illegible because it is not finished, it is never the only copy, and the
+   same words land at full ink in the transcript below a moment later. */
+.said { max-width: 760px; text-align: center; margin: 0;
+        font: 400 19px/1.45 var(--f); color: var(--stage-ink); }
+#screen-record[data-stage="full"] .said { font-size: 24px; }
+.said .prov { color: var(--stage-ink3); filter: blur(3.5px); }
+.said .prov:not(:empty) { margin-left: .3em; }
+
+.stage-foot { display: flex; align-items: center; gap: var(--s3); flex: none; }
+.stage-foot .gate { flex: 1; min-width: 0; font: var(--t-data); color: var(--stage-ink2); }
+.stage-foot .clock { font: var(--t-data); color: var(--stage-ink2); font-variant-numeric: tabular-nums; }
+
+/* The record button keeps its label for a screen reader and for app.js, which
+   rewrites it on every state change; the glyph is what is drawn. */
+.rec-dot {
+  flex: none; width: 46px; height: 46px; padding: 0; border-radius: 50%;
+  font-size: 0; box-shadow: 0 0 0 3px rgba(245,242,238,.14);
+}
+#screen-record[data-stage="full"] .rec-dot { width: 56px; height: 56px; }
+.rec-dot::before { font-size: 15px; line-height: 1; content: "●"; }
+.rec-dot[data-state="live"] { background: var(--risk); color: #fff; }
+.rec-dot[data-state="live"]::before { content: "■"; }
+
+.under { display: flex; flex-direction: column; gap: var(--s4); }
+
+
+/* ============================================ the glass components =======
+ * Cards, rows, chips and fields, as the design specifies them: flat
+ * translucent fills with a hairline edge, macOS grouped-list style. None of
+ * them is blurred. Depth in this window comes from the two glass layers and
+ * the stage, not from decorating every element -- a card that blurs on top of
+ * a panel that blurs is a third region, and the whole point of keeping it to
+ * two is that the wash stays readable and the compositor stays cheap.
+ *
+ * Radii follow the design: 8-9px for controls, 14px for cards, 16px for the
+ * stage.                                                                   */
+
+/* --- grouped lists ------------------------------------------------------ */
+.rowlist {
+  background: var(--card); border: 1px solid var(--edge-card);
+  border-radius: 14px; overflow: hidden; box-shadow: var(--card-sh);
+}
+.rowlist:empty { display: none; }
+.rowlist > .r {
+  width: 100%; display: flex; align-items: center; gap: var(--s3);
+  padding: 11px 14px; background: transparent; border: 0;
+  border-top: 1px solid var(--hair); text-align: left; cursor: pointer;
+  color: var(--ink1);
+}
+.rowlist > .r:first-child { border-top: 0; }
+.rowlist > .r:hover { background: var(--card-hi); }
+.rowlist > .r .t { font: 500 14px/1.35 var(--f); color: var(--ink1); }
+.rowlist > .r .s { font: var(--t-data); color: var(--ink3); margin-top: 2px; }
+.rowlist > .r .when { margin-left: auto; font: var(--t-data); color: var(--ink3);
+                      white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* A date heading between groups of rows. The list stays one card; the heading
+   sits above it, the way a macOS sidebar section label does. */
+.lib-group { font: var(--t-label); letter-spacing: var(--track); text-transform: uppercase;
+             color: var(--ink3); margin: var(--s5) 0 var(--s2); display: flex;
+             align-items: baseline; gap: var(--s2); }
+.lib-group:first-child { margin-top: 0; }
+.lib-group span { font: var(--t-data); letter-spacing: 0; text-transform: none; color: var(--ink4); }
+
+/* --- cards and disclosure groups ---------------------------------------- */
+.sect, .tally, .strip, .panel, .empty, .notready, .firstrun, .asker {
+  background: var(--card); border: 1px solid var(--edge-card);
+  border-radius: 14px; box-shadow: var(--card-sh);
+}
+.sect { overflow: hidden; }
+.sect > .disclose {
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px; background: transparent; border: 0; cursor: pointer;
+  font: 500 14px/1.2 var(--f); color: var(--ink1); text-align: left;
+}
+.sect > .disclose:hover { background: var(--card-hi); }
+.sect > .body-in { padding: 0 14px 14px; }
+.empty, .notready, .firstrun, .tally, .strip, .panel, .asker { padding: 14px; }
+.empty { color: var(--ink2); }
+.empty strong { display: block; color: var(--ink1); margin-bottom: 4px; }
+
+/* --- controls ----------------------------------------------------------- */
+.btn {
+  border-radius: 9px; border: 1px solid var(--edge-card);
+  background: var(--btn); color: var(--ink1); box-shadow: var(--btn-sh);
+}
+.btn:hover { background: var(--card-hi); }
+.btn.primary { background: var(--amber-flat); color: var(--amber-ink);
+               border-color: var(--amber-edge); font-weight: 600; }
+.btn.primary:hover { background: var(--amber-flat); filter: brightness(1.06); }
+
+.chip {
+  border-radius: 8px; border: 1px solid var(--edge-card);
+  background: var(--btn); color: var(--ink2); padding: 6px 11px;
+}
+.chip:hover { background: var(--card-hi); color: var(--ink1); }
+.chip[aria-pressed="true"], .chip[aria-checked="true"], .chip.on {
+  background: var(--amber-soft); border-color: var(--amber-flat); color: var(--amber-t);
+}
+
+.input, .sel, input[type="text"], input[type="search"], input[type="number"], select, textarea {
+  border-radius: 8px; background: var(--field); color: var(--ink1);
+  border: 0; box-shadow: var(--field-sh);
+}
+.input:focus-visible, .sel:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 2px solid var(--amber-flat); outline-offset: 1px;
+}
+
+/* --- the two Assistants panels ------------------------------------------ */
+/* Their glyphs carry can/cannot, not their colour, so the pair survives
+   greyscale. Only the tint differs here. */
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--s4); }
+.panel.no { background: var(--risk-soft); border-color: var(--risk-t); }
+
+/* --- headings ------------------------------------------------------------ */
+.screen > .h { font: 800 26px/1.12 var(--f); letter-spacing: -.02em; color: var(--ink1); margin: 0; }
+.screen > .meta { color: var(--ink3); margin: 6px 0 var(--s5); }
+
+
+/* ================================================ matching the design =====
+ * Three corrections against `Vlocalhost Glass Window.dc.html`.
+ *
+ * 1. MONOSPACE. The design uses IBM Plex Mono twelve times, and only where the
+ *    content is data: the clock, the gate line, transcript timestamps, a row's
+ *    time, a citation's second. Everything else is Inter Tight, in sentence
+ *    case. This app had reached thirty-four mono declarations and was setting
+ *    the sidebar's group labels and every screen's subtitle in tracked
+ *    uppercase mono, which is what made it read as a terminal rather than as
+ *    the design. Those go back to sans; the data stays mono.               */
+.nav .g {
+  font: 500 11px/1.3 var(--f); letter-spacing: .02em;
+  text-transform: none; color: var(--ink3);
+}
+.meta, .stage .meta { font: var(--t-body); color: var(--ink3);
+                      text-transform: none; letter-spacing: 0; }
+.screen > .meta { font: 400 14px/1.5 var(--f); color: var(--ink3);
+                  text-transform: none; letter-spacing: 0; max-width: 62ch; }
+.chrome .t { font: 500 11px/1.3 var(--f); letter-spacing: .02em; text-transform: none; }
+.panel-k { font: 500 13px/1.3 var(--f); letter-spacing: 0; text-transform: none; }
+.lib-group { font: 500 11px/1.3 var(--f); letter-spacing: .02em; text-transform: none; }
+.lib-group span { font: 400 12px/1.3 var(--f); }
+/* Still data, still mono: */
+.ln .ts, .stage-foot .gate, .stage-foot .clock,
+.rowlist > .r .when, .scale { font: var(--t-data); }
+
+/* 2. THE RECORD BUTTON. The design draws a ring with a shape inside it, not a
+ *    filled disc: 2px stroke, transparent centre, a 26px amber circle while
+ *    idle and a 15px rounded square while recording. Addressed by id because
+ *    `.btn.primary` is more specific than a class here and would keep painting
+ *    the whole button amber.                                               */
+#record.rec-dot {
+  width: 46px; height: 46px; padding: 0; border-radius: 50%;
+  background: transparent; border: 2px solid rgba(255, 255, 255, .22);
+  display: grid; place-items: center; box-shadow: none; font-size: 0;
+}
+#screen-record[data-stage="full"] #record.rec-dot { width: 56px; height: 56px; }
+#record.rec-dot::before {
+  content: ""; display: block; width: 26px; height: 26px;
+  border-radius: 50%; background: var(--amber-flat);
+}
+#record.rec-dot:hover { background: transparent; filter: brightness(1.08); }
+#record.rec-dot[data-state="live"] { border-color: var(--amber-flat); }
+#record.rec-dot[data-state="live"]::before { width: 15px; height: 15px; border-radius: 4px; }
+
+/* 3. ASK. The scope bar the design puts above the answer: one tick per
+ *    meeting, amber for indexed and hairline for not, so the sentence beside
+ *    it has something to point at. */
+.index-ticks { display: flex; gap: 2px; height: 6px; border-radius: 3px;
+               overflow: hidden; margin-bottom: 8px; }
+.index-ticks i { flex: 1 1 0; background: var(--hair2); border-radius: 1px; }
+.index-ticks i.on { background: var(--amber-flat); }
+
+/* The status pills. Their markup already reads "Idle · 0 bytes out" in
+   sentence case, as the design does; it was the stylesheet uppercasing and
+   tracking them into something that looked like a readout. */
+.pill, .nav .foot {
+  font: 500 11px/1.3 var(--f); letter-spacing: .01em; text-transform: none;
+}
+
+/* Disclosure headers. The design writes them "Capture", "Language", "Live
+   transcript" — sentence case, sans, the same weight as a row title. They were
+   the single biggest source of tracked uppercase left in the window: sixteen of
+   them across Settings and Assistants alone. */
+.disclose, .disclose .tri {
+  font: 500 14px/1.2 var(--f); letter-spacing: 0; text-transform: none;
+}
+.disclose .tri { font-size: 10px; color: var(--ink4); }
+
+/* A library row's second line is prose, not a readout. */
+.rowlist > .r .s, .r .s { font: 400 12px/1.4 var(--f); color: var(--ink3); }
+
+
+/* ===================================================== the Ask aurora =====
+ * A conic gradient turning behind the question box, from the design: a sharp
+ * ring showing through a 1.5px padding, and a wider bloom outside it. Both
+ * rotate; neither animates a blur radius, and the blur is on a static element,
+ * so this stays one composited layer rather than work per frame.
+ *
+ * It brightens and speeds up while a question is being answered -- the only
+ * moving thing on the screen at the moment the user is waiting.            */
+.ask-aura { position: relative; margin-bottom: 18px; }
+.ask-aura .aura-bloom {
+  position: absolute; inset: -14px; border-radius: 28px;
+  overflow: hidden; pointer-events: none; opacity: .22;
+  transition: opacity .3s ease;
+}
+.ask-aura .aura-bloom i {
+  position: absolute; inset: -70%;
+  background: conic-gradient(from 0deg, #E2A43A, #8C7BD6, #4FB88C, #E2A43A);
+  filter: blur(34px); animation: vh-aurora 9s linear infinite;
+}
+.ask-aura .aura-edge {
+  position: relative; border-radius: 16px; padding: 1.5px;
+  overflow: hidden; isolation: isolate;
+}
+.ask-aura .aura-ring {
+  position: absolute; inset: -60%;
+  background: conic-gradient(from 0deg, #E2A43A, #8C7BD6, #4FB88C, #E2A43A);
+  opacity: .75; filter: blur(10px); animation: vh-aurora 9s linear infinite;
+  transition: opacity .3s ease;
+}
+.ask-aura .aura-in {
+  position: relative; border-radius: 15px;
+  background: var(--panel-flat); padding: 14px 16px 16px;
+}
+/* The form is the aurora's content now, so it stops being a card of its own. */
+.ask-aura .asker {
+  background: transparent; border: 0; box-shadow: none; padding: 0;
+  display: flex; gap: 10px; align-items: center;
+}
+.ask-aura .asker .input { flex: 1; height: 38px; }
+.ask-aura .asker .btn { height: 38px; padding: 0 20px; }
+
+.ask-aura.busy .aura-bloom { opacity: .55; }
+.ask-aura.busy .aura-ring { opacity: 1; }
+.ask-aura.busy .aura-bloom i, .ask-aura.busy .aura-ring { animation-duration: 2.4s; }
+
+@keyframes vh-aurora { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .ask-aura .aura-bloom i, .ask-aura .aura-ring { animation: none; }
+}
+
+/* ================================================== the view controls =====
+ * Two icon buttons under the status pill. Sized and coloured like the nav
+ * items above them so they read as part of the sidebar rather than as a
+ * toolbar that wandered in.                                               */
+.viewctl { display: flex; gap: 4px; margin-top: 8px; flex: none; }
+.vbtn {
+  width: 30px; height: 30px; display: grid; place-items: center;
+  border: 0; border-radius: 8px; background: transparent;
+  color: var(--ink3); cursor: pointer; padding: 0;
+}
+.vbtn:hover { background: var(--btn); color: var(--ink1); }
+.vbtn svg { width: 15px; height: 15px; display: block; }
+.vbtn[data-off="true"] svg { opacity: .45; }
+
+
+/* ============================================== the sidebar, as drawn =====
+ * Measured out of `Vlocalhost Glass Window.dc.html` rather than matched by eye.
+ * The design's nav is: gap 14px between groups, padding 0 10px 12px, a brand
+ * row at the top, group labels at 600 11px in sentence case, and items at 13px
+ * on a 30px row with an 8px radius — and no bullet. The dot before every item
+ * was this app's own invention; the design uses a filled row for the current
+ * screen and keeps a dot for one thing only, which is that a recording is
+ * running.                                                                  */
+.nav { gap: 1px; padding: 0 10px 12px; }
+
+.nav .brand {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 8px 10px; flex: none; margin-top: 14px;
+}
+.nav .brand .wordmark {
+  font: 600 15px/1.2 var(--f); letter-spacing: -.02em; color: var(--ink1);
+}
+
+.nav .g {
+  font: 600 11px/1.2 var(--f); letter-spacing: .02em; text-transform: none;
+  color: var(--ink3); padding: 10px 10px 4px; margin: 13px 0 0; white-space: nowrap;
+}
+.nav .brand + .g { margin-top: 0; }
+
+.nav button {
+  display: flex; align-items: center; gap: 10px;
+  height: 30px; min-height: 30px; padding: 0 10px; width: 100%;
+  border: 0; border-radius: 8px; background: transparent;
+  font: 400 13px/1 var(--f); letter-spacing: -.005em;
+  color: var(--ink1); text-align: left; white-space: nowrap; cursor: pointer;
+}
+.nav button[aria-current="page"] { background: var(--glass-strong); font-weight: 600; box-shadow: none; }
+
+/* No bullet at rest. The one exception is the design's own: a live recording
+   puts a dot at the *end* of the Recording row, which is a state worth a mark
+   because it is true while you are looking at another screen. */
+.nav button .dot { display: none; }
+:root[data-rec="live"] .nav button[data-screen="record"] .dot {
+  /* order:2 matters. The dot is the first child in the markup, so margin-left
+     :auto on its own pushes the dot *and the label after it* to the right. */
+  display: block; order: 2; margin-left: auto; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--risk); box-shadow: none;
+}
+
+/* The view controls line up with the rows above them. */
+.viewctl { gap: 2px; margin-top: 10px; padding: 0 8px; }
+
+/* The band above the content names the screen, in the same sentence case as
+   everything else. It was being uppercased in JS as well as in CSS. */
+.chrome .t { font: 500 13px/1.2 var(--f); letter-spacing: 0; text-transform: none; color: var(--ink2); }
+
+/* First-run asks "Area of work", not "AREA OF WORK". */
+.chiprow-h { font: 500 12px/1.3 var(--f); letter-spacing: 0; text-transform: none; color: var(--ink3); }
