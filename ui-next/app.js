@@ -1136,14 +1136,51 @@ function wireMachine() {
    * whose job is not on the list must be able to type it. */
   api().setup_options().then(o => {
     if (!o) return;
-    const fill = (id, values) => {
-      const dl = $('#' + id);
-      if (!dl || !values) return;
-      dl.replaceChildren();
-      for (const v of values) { const opt = el('option'); opt.value = v; dl.append(opt); }
+    /* A <datalist> was the wrong control. Edge draws it as an ordinary text
+       box -- no arrow, no affordance -- so once a value is saved the twelve
+       choices are invisible and the field reads as locked to whatever is in
+       it. Reported exactly that way: "why is the area of work limited to
+       Customer Success". A <select> shows that choices exist; "Something
+       else" keeps the escape hatch for a job that is not on the list. */
+    const OTHER = '— Something else —';
+    const pick = (selId, inputId, values) => {
+      const sel = $('#' + selId);
+      const input = $('#' + inputId);
+      if (!sel || !input || !values) return;
+      sel.replaceChildren();
+      const blank = el('option', null, 'Not set');
+      blank.value = '';
+      sel.append(blank);
+      for (const v of values) { const o = el('option', null, v); o.value = v; sel.append(o); }
+      const other = el('option', null, OTHER);
+      other.value = OTHER;
+      sel.append(other);
+
+      /* The input stays the one control carrying data-setting, so loading and
+         saving are untouched; the select is a view onto it. */
+      const syncFromInput = () => {
+        const v = input.value || '';
+        const known = values.includes(v);
+        sel.value = v === '' ? '' : (known ? v : OTHER);
+        input.hidden = !(v !== '' && !known);
+      };
+      sel.addEventListener('change', () => {
+        if (sel.value === OTHER) {
+          input.hidden = false;
+          input.focus();
+          return;
+        }
+        input.hidden = true;
+        input.value = sel.value;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      input.addEventListener('change', syncFromInput);
+      syncFromInput();
+      /* Settings load before these options exist, so re-sync once they do. */
+      setTimeout(syncFromInput, 0);
     };
-    fill('user-fields', o.user_fields);
-    fill('user-tones', o.user_tones);
+    pick('pick-user-field', 'set-user-field', o.user_fields);
+    pick('pick-user-tone', 'set-user-tone', o.user_tones);
   }).catch(() => {});
 
   /* Version and engine state are read at boot -- neither touches the network. */

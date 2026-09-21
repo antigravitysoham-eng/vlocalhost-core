@@ -413,22 +413,30 @@ def the_brand_wash_survives_every_appearance():
 
 @case("Transcription got much slower after I added my word list")
 def the_glossary_cap_stays_behind_the_cliff():
-    """Handing the recogniser hotwords is free up to about sixteen terms and
-    then falls off a cliff -- measured, medians of interleaved runs on the same
-    audio: 16 terms 0.99x, 24 terms 2.76x, 120 terms 5.21x.
+    """The cap must exist and must be bounded -- but not at sixteen, and this
+    test used to insist on sixteen because of a measurement that was wrong.
 
-    This app already waits 800ms of silence plus a decode before a line
-    appears. Tripling the decode would undo every latency argument the window
-    makes, so the cap is a wall rather than a preference. Hallucination is not
-    what limits it -- ten decoys planted in audio containing none of them were
-    heard zero times at 10 terms and at 200.
+    The old bench fed Whisper synthetic terms (Termik0, Filler1). Nonsense
+    hotwords can tip the decoder into a repetition loop, which is bimodal
+    rather than a curve, and it read as a cliff: 8 terms 8.0x, 16 terms 1.1x,
+    32 terms 8.8x. A cost curve cannot rise, fall and rise again -- that
+    non-monotonicity is what exposed it.
+
+    Re-measured on real vocabulary over 32.6s of audio, 5 reps, median: 0
+    terms 1.00x, 8 1.09x, 16 1.28x, 32 1.12x, 64 1.15x, 74 1.26x. Flat.
+
+    So what this guards is the thing that is still true: the list handed to the
+    decoder is bounded, and it is measured on *real* words. An unbounded cap
+    would let a pasted thousand-line list reach the decoder, where the tail is
+    genuinely bad (one 8.45s run at 74 terms against a 2.4s baseline).
     """
     import config
     import transcriber
     cap = getattr(config, "GLOSSARY_MAX_TERMS", 0)
-    assert 0 < cap <= 20, (
-        f"cap is {cap}; past ~16 terms the decode is 2.5x slower or worse. "
-        "Re-measure with tools/bench_glossary.py before raising it.")
+    assert 0 < cap <= 120, (
+        f"cap is {cap}; it must stay bounded. Re-measure with "
+        "tools/bench_glossary.py on REAL vocabulary -- synthetic terms "
+        "produce a false cliff -- before raising it further.")
 
     keep = config.GLOSSARY
     try:
@@ -440,6 +448,71 @@ def the_glossary_cap_stays_behind_the_cliff():
         assert transcriber.glossary_terms() == ["Helius", "BFSI"],             "duplicates and blank lines are reaching the decoder"
     finally:
         config.GLOSSARY = keep
+
+
+@case("The bottom of the window is off the screen and I cannot reach the buttons")
+def the_window_fits_the_screen_it_opens_on():
+    """shell.py asked for 1180x820 CSS px regardless of the display. On a
+    1920x1200 panel at 150% -- a 1280x800 CSS desktop -- 820 became 1230 device
+    pixels against 1200 of screen, so the window opened taller than the monitor
+    and the foot of every screen sat under the taskbar with nothing to scroll.
+    Measured before the fix: window 1770x1226 at y=38, i.e. 64px past the
+    bottom edge.
+    """
+    import importlib.util
+
+    import webview
+
+    path = os.path.join(ROOT, "ui-next", "shell.py")
+    spec = importlib.util.spec_from_file_location("_vlshell_t", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert hasattr(mod, "_fit"), "the window no longer measures the screen"
+
+    sw, sh = webview.screens[0].width, webview.screens[0].height
+    w, h, mn = mod._fit(mod.WIDTH, mod.HEIGHT, mod.MIN_SIZE)
+    assert w <= sw, f"window {w} wider than the {sw}px screen"
+    assert h <= sh, f"window {h} taller than the {sh}px screen"
+    assert mn[0] <= w and mn[1] <= h,         "the minimum size is bigger than the window that fits"
+    # And it must still hand back the full size on a display with room, or the
+    # clamp would have quietly shrunk the app for everybody.
+    assert mod._fit(800, 600, (400, 300)) == (800, 600, (400, 300))         or (800 > sw - 40 or 600 > sh - 90),         "a window that already fits was shrunk anyway"
+
+
+@case("Why is the area of work limited to Customer Success?")
+def the_area_of_work_shows_its_choices():
+    """It was never limited -- it was an <input list=...> datalist, which Edge
+    draws as a plain text box with no arrow. Once a value was saved the twelve
+    options were invisible, so the field read as locked to whatever it held.
+    A control whose choices cannot be seen is a control that does not offer
+    them.
+    """
+    html = read("ui-next", "index.html")
+    assert 'id="pick-user-field"' in html, "the area-of-work picker is gone"
+    assert 'id="pick-user-tone"' in html, "the notes-tone picker is gone"
+    assert 'list="user-fields"' not in html,         "back to a datalist, whose choices Edge does not show"
+    js = read("ui-next", "app.js")
+    assert "pick('pick-user-field', 'set-user-field'" in js,         "the picker is not populated from setup_options"
+    # The input still carries data-setting, or loading and saving break.
+    assert 'data-setting="USER_FIELD"' in html
+    assert 'data-setting="USER_TONE"' in html
+
+
+@case("Every sentence appears twice in the live transcript")
+def provisional_text_never_repeats_a_finished_line():
+    """A partial decoded from audio that had already been finalised arrived
+    about a second after the real line and was rendered as provisional text
+    beneath it -- four ghosts in thirty-three seconds of speech-clean.wav. The
+    old guard only asked whether the queue was empty, which it is again as soon
+    as the final has been dequeued and written.
+    """
+    src = read("notetaker.py")
+    assert "_utt_gen" in src, "the utterance generation counter is gone"
+    assert "gen != self._utt_gen" in src,         "the decoder no longer checks whether its partial is still current"
+    # The bump must happen where an utterance is finalised, not anywhere else.
+    i = src.index("def _on_utterance")
+    j = src.index("def _on_partial")
+    assert "self._utt_gen += 1" in src[i:j],         "the generation is not bumped when a segment is finalised"
 
 
 def main(argv=None):

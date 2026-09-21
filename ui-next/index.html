@@ -865,22 +865,25 @@
             <div class="field">
               <label for="set-user-field">Area of work</label>
               <div class="ctl">
+                <select id="pick-user-field" class="sel"
+                        aria-label="Choose an area of work"></select>
                 <input id="set-user-field" class="input wide" type="text"
-                       list="user-fields" placeholder="not set"
+                       placeholder="type your own" hidden
                        data-setting="USER_FIELD">
-                <datalist id="user-fields"></datalist>
-                <p class="hint">Pick one or type your own. Leave empty to turn
-                  personalisation off.</p>
+                <p class="hint">Pick one, or choose "Something else" to type your
+                  own. Leave empty to turn personalisation off.</p>
               </div>
             </div>
             <div class="field">
               <label for="set-user-tone">Notes should read</label>
               <div class="ctl">
+                <select id="pick-user-tone" class="sel"
+                        aria-label="Choose how the notes should read"></select>
                 <input id="set-user-tone" class="input wide" type="text"
-                       list="user-tones" placeholder="not set"
+                       placeholder="describe your own" hidden
                        data-setting="USER_TONE">
-                <datalist id="user-tones"></datalist>
-                <p class="hint">Pick one or describe your own.</p>
+                <p class="hint">Pick one, or choose "Something else" to describe
+                  your own.</p>
               </div>
             </div>
             <div class="field">

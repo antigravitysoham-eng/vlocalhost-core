@@ -273,19 +273,32 @@ GLOSSARY = ""
 #:         40    10.2s      2.45x
 #:        120    21.5s      5.21x
 #:
-#: Free to about sixteen and then it falls off. That is not a curve to tune
-#: along, it is a wall to stay behind: this app already waits 800ms of silence
-#: plus a decode before a line appears, and tripling the decode would undo
-#: every latency argument the window makes.
+#: This was 16, on a measurement that was wrong. The bench that produced it fed
+#: Whisper synthetic terms -- Termik0, Filler1 -- and those occasionally tip the
+#: decoder into a repetition loop. That is bimodal, not a cost curve, and it
+#: read as a cliff at sixteen: 8 terms 8.0x, 16 terms 1.1x, 32 terms 8.8x. A
+#: cost curve cannot go up, down and up again, which is what gave it away.
 #:
-#: Hallucination, the other half of the trade, turned out not to be the binding
-#: constraint -- ten plausible decoys planted in audio containing none of them
-#: were heard zero times, at 10 terms and at 200. Speed is what limits this.
+#: Re-measured on real vocabulary -- names, places, jargon, the sort of thing
+#: somebody actually types in -- on 32.6s of audio, 5 reps, median:
+#:
+#:      0 terms  2.41s  1.00x        32 terms  2.70s  1.12x
+#:      8 terms  2.62s  1.09x        64 terms  2.77s  1.15x
+#:     16 terms  3.08s  1.28x        74 terms  3.03s  1.26x
+#:
+#: Flat. Sixty-four terms cost what eight do. There is no wall to stay behind,
+#: so the cap now sits where a person stops wanting to scroll rather than where
+#: the decoder complains. The occasional slow run still happens (one 8.45s max
+#: at 74 terms), so this is not unbounded.
+#:
+#: Hallucination, the other half of the trade, is not the binding constraint
+#: either -- ten plausible decoys planted in audio containing none of them were
+#: heard zero times, at 10 terms and at 200.
 #:
 #: The glossary itself may be as long as the user likes. This decides how many
 #: of them are handed over, so the list wants to be ordered with the most
 #: valuable first. See tools/bench_glossary.py to re-measure on other hardware.
-GLOSSARY_MAX_TERMS = 16
+GLOSSARY_MAX_TERMS = 64
 
 # --- Appearance ----------------------------------------------------------
 # "system", "light" or "dark".

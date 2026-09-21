@@ -125,6 +125,10 @@ class NoteTaker:
         # a backlog of stale text to grind through.
         self._partial_slot = None
         self._partial_lock = threading.Lock()
+        # Which utterance the slot belongs to. Bumped the moment a segment is
+        # finalised, so provisional audio from a sentence that is already
+        # written cannot come back as a ghost of itself -- see _run_partial.
+        self._utt_gen = 0
         self._next_partial_at = 0.0
         self._transcript = []
         self._lock = threading.Lock()
@@ -207,13 +211,22 @@ class NoteTaker:
 
     # -- pipeline -------------------------------------------------------------
     def _on_utterance(self, pcm_bytes, label=None):
-        """One detected speech segment, tagged with the source it came from."""
+        """One detected speech segment, tagged with the source it came from.
+
+        This is also where provisional text for that segment stops being
+        wanted. The sentence is about to be written properly, so both the
+        partial waiting in the slot and any partial currently in the decoder
+        are retired -- the generation bump is what the decoder checks.
+        """
+        with self._partial_lock:
+            self._utt_gen += 1
+            self._partial_slot = None
         self._utt_q.put((pcm_bytes, label))
 
     def _on_partial(self, pcm_bytes, label=None):
         """Audio for an utterance still in progress. Newest wins."""
         with self._partial_lock:
-            self._partial_slot = (pcm_bytes, label)
+            self._partial_slot = (pcm_bytes, self._utt_gen, label)
 
     def _take_partial(self):
         """The waiting partial, if it is worth spending the model on.
@@ -241,7 +254,7 @@ class NoteTaker:
         item = self._take_partial()
         if item is None:
             return
-        pcm, label = item
+        pcm, gen, label = item
         started = time.monotonic()
         try:
             text = self.transcriber.transcribe(pcm, partial=True)
@@ -254,8 +267,16 @@ class NoteTaker:
             return
         self._next_partial_at = time.monotonic() + (time.monotonic() - started)
         # A final may have landed while this was decoding, in which case the
-        # real line is already on screen and this is stale.
-        if text and self._utt_q.empty():
+        # real line is already on screen and this is stale. Checking the queue
+        # is not enough: the final can have been dequeued, decoded and written
+        # in that time, and then an empty queue says "go ahead" for text the
+        # reader has already seen. Measured on speech-clean.wav, that put a
+        # duplicate of every sentence back on screen about a second after the
+        # real line -- four ghosts in thirty-three seconds. The generation is
+        # what actually answers "is this still the sentence being spoken".
+        with self._partial_lock:
+            stale = gen != self._utt_gen
+        if text and not stale and self._utt_q.empty():
             self.on_partial(text, label or "")
 
     def _transcribe_loop(self):

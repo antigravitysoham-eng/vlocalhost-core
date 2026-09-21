@@ -45,6 +45,42 @@ WIDTH, HEIGHT = 1180, 820
 MIN_SIZE = (680, 560)
 
 
+def _fit(width, height, min_size):
+    """Shrink the requested window until it fits the screen it will open on.
+
+    Both numbers here are in the same unit -- `webview.screens` and
+    `create_window(width=...)` are each in CSS pixels -- so this is a plain
+    clamp with no DPI arithmetic. An earlier version of this function scaled by
+    the monitor DPI and was wrong twice over: the factor does not belong, and
+    every DPI query returns 96 to this process anyway, because it is not
+    marked DPI-aware and Windows virtualises them all.
+
+    Measured on Soham's laptop, which is where this came from: a 1920x1200
+    panel at 150% presents as 1280x800 CSS px. The 820 asked for above becomes
+    1230 device px against 1200 of screen, so the window opened taller than the
+    display and the foot of every screen -- the buttons under "This machine"
+    among them -- sat under the taskbar or past the bottom edge with no way to
+    scroll to them.
+    """
+    try:
+        import webview
+        screens = list(webview.screens) or []
+    except Exception:                                    # noqa: BLE001
+        return width, height, min_size
+    if not screens:
+        return width, height, min_size
+
+    # Room for the frame, the menu bar and the taskbar. Height is the edge a
+    # short screen runs out of first, so it gets the larger allowance.
+    avail_w = screens[0].width - 40
+    avail_h = screens[0].height - 90
+    w = max(360, min(width, avail_w))
+    h = max(320, min(height, avail_h))
+    # A minimum bigger than the screen is not a minimum, it is a guarantee the
+    # window opens too big and cannot be resized out of it.
+    return w, h, (min(min_size[0], w), min(min_size[1], h))
+
+
 def _menu(api):
     """A native menu bar.
 
@@ -150,12 +186,13 @@ def main(argv=None):
     url = pathlib.Path(INDEX).resolve().as_uri()
 
     api = api_mod.Api()
+    width, height, min_size = _fit(WIDTH, HEIGHT, MIN_SIZE)
     window = webview.create_window(
         "Vlocalhost AI",
         url=url,
         js_api=api,
-        width=WIDTH, height=HEIGHT,
-        min_size=MIN_SIZE,
+        width=width, height=height,
+        min_size=min_size,
         # The page paints its own ground from --paper, and the two must agree
         # or a resize flashes white on a dark appearance before the first frame
         # lands. This is Aurora's *light* --paper, so on a machine set to dark
