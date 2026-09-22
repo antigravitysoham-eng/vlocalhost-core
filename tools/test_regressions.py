@@ -515,6 +515,41 @@ def provisional_text_never_repeats_a_finished_line():
     assert "self._utt_gen += 1" in src[i:j],         "the generation is not bumped when a segment is finalised"
 
 
+@case("Assistants says I have 41 meetings and I have none")
+def the_reach_back_line_counts_real_meetings():
+    """Three separate invented numbers fed one line.
+
+    `ARCHIVE` shipped as { total: 41, indexed: 38 } and the Aurora Glass change
+    emptied it -- but `drawScope()` had already run 1,593 lines earlier and was
+    never called again, so the Assistants screen went on saying "all 41 of
+    them". Behind it `INSIDE = { 0: 41, 7: 4, 30: 12, 90: 27, 180: 36 }` was a
+    second invented archive, so once the total really was 0 the other scopes
+    rendered "4 of 0 meetings. The other -4 are refused."
+
+    And `meetings` is seeded with a demo row behind `if (!window.pywebview)` --
+    a guard that is false on every real launch, because pywebview injects its
+    bridge after the script runs. Counting it made a fresh install claim one
+    meeting it did not have.
+
+    A number a reader cannot check is the same problem as a fabricated
+    citation, which is the bug the rest of that change exists to fix.
+    """
+    js = read("ui-next", "app.js")
+    assert "const INSIDE = {" not in js, "the invented per-scope archive is back"
+    assert "function inReach(" in js,         "the scope counts are no longer taken from the library"
+    assert "typeof meetings === 'object' ? meetings.length : 0" not in js,         "recount counts the demo row again"
+    assert "Math.max(0, total - n)" in js, "a negative refused-count can return"
+    # It must be painted once, from the boot block, after the counts are real.
+    assert "recount(); paint(); drawScope();" in js,         "the boot block no longer paints the reach-back line"
+    bare = [i for i, line in enumerate(js.split(chr(10)), 1)
+            if line.strip() == "drawScope();"]
+    assert not bare, (
+        "drawScope() is called on its own at line(s) "
+        + ", ".join(str(i) for i in bare)
+        + " -- at module load ARCHIVE is still a placeholder and libRows is in "
+        "its temporal dead zone, which is how 41 survived being deleted.")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--app", help="a built bundle's app/ directory")

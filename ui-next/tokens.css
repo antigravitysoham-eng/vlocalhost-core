@@ -211,3 +211,225 @@
   :root:not([data-appearance="light"]) { --glow: .34; }
 }
 @media (prefers-contrast: more) { :root { --glow: 0; } }
+
+
+/* ======================================================= the glass layer ====
+ * Aurora Glass, from `Vlocalhost Glass Window.dc.html`.
+ *
+ * These are a *second* palette, not an edit of the one above. The design moves
+ * the ground from cool paper (#FBFAFD) to warm bone (#EDEBE7) and names its ink
+ * --ink1..4 where this file names it --ink..--ink-4, so the two sets sit side by
+ * side without colliding. Nothing above is re-pointed at them: the screens that
+ * have not been ported yet keep rendering exactly as they did, and a screen opts
+ * in by using these names. When the last screen is ported the old set goes.
+ *
+ * The design file keys every token off [data-appearance="light"|"dark"]. That is
+ * the review affordance this file's own comment says left on 15 Sep, so it is
+ * not reintroduced here: light is :root, dark is the system's, and the explicit
+ * [data-appearance="dark"] block exists only to match the convention already
+ * used above it.
+ *
+ * Contrast, measured by the design against the worst case -- the surface's own
+ * opacity over the point where all three wash blobs overlap, #CFC2AD in light
+ * and #454A8B in dark:
+ *
+ *            light: on glass / on card      dark: on glass / on card
+ *   --ink1      14.2 / 16.4                      11.4 / 10.0
+ *   --ink2       8.6 / 10.0                       6.8 /  5.9
+ *   --ink3       4.8 /  5.6                       5.2 /  4.6
+ *   --ink4       2.6 /  3.0   (disabled only)     2.5 /  2.2
+ *   --amber-t    6.0 /  6.9                       7.0 /  6.2
+ *
+ * --ink4 is under 4.5 on purpose and is only ever a disabled or dormant mark.
+ * Text is never placed directly on the wash: --ink3 measures 3.4 there, which is
+ * why --glass has a floor of .58 and --panel a floor of .88.                  */
+:root {
+  --bg:#EDEBE7;
+  --w1:rgba(226,164,58,.26); --w2:rgba(198,170,140,.30); --w3:rgba(150,160,175,.22);
+  --glass:rgba(255,255,255,.58);
+  --panel:rgba(253,252,251,.88);
+  --panel-solid:rgba(255,255,255,.95);
+  --panel-flat:#FBF9F7;
+  --glass-strong:rgba(28,25,22,.06);
+  --card:rgba(255,255,255,.66); --card-hi:rgba(255,255,255,.9);
+  --edge:rgba(255,255,255,.75); --edge-card:rgba(28,25,22,.07);
+  --sheen:none;
+  --sheen-panel:linear-gradient(180deg,rgba(255,255,255,.4),rgba(255,255,255,0) 26%);
+  --card-sh:0 1px 2px rgba(28,25,22,.04);
+  --btn:rgba(28,25,22,.055); --btn-sh:none;
+  --field:rgba(255,255,255,.9); --field-sh:inset 0 0 0 1px rgba(28,25,22,.12);
+
+  /* The capture stage is opaque in both appearances. It carries the waveform
+     and the moving sentence, and a translucent surface under moving type is
+     where contrast and compositing cost fail at the same time. */
+  --stage:#141315;
+  --stage-ink:#F5F2EE;
+  --stage-ink2:rgba(245,242,238,.62);
+  --stage-ink3:rgba(245,242,238,.34);
+
+  --hair:rgba(28,25,22,.08); --hair2:rgba(28,25,22,.16);
+  --ink1:#1A1815; --ink2:#413D38; --ink3:#67625B; --ink4:#948E86;
+  --amber-grad:linear-gradient(180deg,#F1B449,#D9962B);
+  --amber:#DE9C2F; --amber-flat:#DE9C2F; --amber-ink:#1A1204;
+  --amber-edge:rgba(120,70,0,.28); --amber-t:#7A4A00;
+  --amber-soft:rgba(216,154,51,.14);
+  --meter:linear-gradient(180deg,#F5C453,#CF8F1E);
+  --mint:#4FB88C;  --mint-t:#136A4A;  --mint-soft:rgba(79,184,140,.14);
+  --lilac:#8C7BD6; --lilac-t:#57479E; --lilac-soft:rgba(140,123,214,.12);
+  --risk:#D2453A;  --risk-t:#A32A20;  --risk-soft:rgba(210,69,58,.10);
+  --sh1:0 1px 1px rgba(28,25,22,.03),0 8px 28px rgba(28,25,22,.06);
+  --sh2:0 2px 6px rgba(28,25,22,.08),0 30px 80px rgba(28,25,22,.16);
+  --blur:24px; --sat:1.3;
+}
+
+
+/* The dark glass, following the system — and the explicit override only to
+ * match the convention this file already uses above. --ink3 is #A0A6AF rather
+ * than the light set's mirror because dark is the harder case here: the glass
+ * is darker than the lit wash, so a card sitting on the brightest point of the
+ * aurora is where 4.5 is won or lost. --stage-ink* are unchanged from light;
+ * the stage is the one surface that does not move between appearances.      */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-appearance="light"]) {
+  --bg:#090A0E;
+  --w1:rgba(233,169,62,.14); --w2:rgba(70,125,185,.42); --w3:rgba(125,100,225,.38);
+  --glass:rgba(24,26,33,.55);
+  --panel:rgba(24,26,33,.84);
+  --panel-solid:rgba(255,255,255,.14);
+  --panel-flat:#17191F;
+  --glass-strong:rgba(255,255,255,.10);
+  --card:rgba(255,255,255,.045); --card-hi:rgba(255,255,255,.08);
+  --edge:rgba(255,255,255,.10); --edge-card:rgba(255,255,255,.08);
+  --sheen:none;
+  --sheen-panel:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,0) 30%);
+  --card-sh:none;
+  --btn:rgba(255,255,255,.08); --btn-sh:none;
+  --field:rgba(255,255,255,.06); --field-sh:inset 0 0 0 1px rgba(255,255,255,.14);
+  --stage:#0C0D11;
+  --hair:rgba(255,255,255,.08); --hair2:rgba(255,255,255,.15);
+  --ink1:#F1F2F4; --ink2:#B9BDC5; --ink3:#A0A6AF; --ink4:#6A6F79;
+  --amber-grad:linear-gradient(180deg,#F0B347,#D8952A);
+  --amber:#E2A43A; --amber-flat:#E2A43A; --amber-edge:rgba(0,0,0,.35); --amber-t:#F2B65C;
+  --amber-soft:rgba(226,164,58,.14);
+  --mint:#5FD3A6;  --mint-t:#5FD3A6;  --mint-soft:rgba(95,211,166,.12);
+  --lilac:#B7A8F5; --lilac-t:#B7A8F5; --lilac-soft:rgba(140,120,235,.14);
+  --risk:#E5574B;  --risk-t:#F58A80;  --risk-soft:rgba(229,87,75,.14);
+  --sh1:0 1px 1px rgba(0,0,0,.3),0 12px 36px rgba(0,0,0,.4);
+  --sh2:0 2px 6px rgba(0,0,0,.5),0 30px 90px rgba(0,0,0,.6);
+  --blur:28px; --sat:1.25;
+  }
+}
+
+:root[data-appearance="dark"] {
+  --bg:#090A0E;
+  --w1:rgba(233,169,62,.14); --w2:rgba(70,125,185,.42); --w3:rgba(125,100,225,.38);
+  --glass:rgba(24,26,33,.55);
+  --panel:rgba(24,26,33,.84);
+  --panel-solid:rgba(255,255,255,.14);
+  --panel-flat:#17191F;
+  --glass-strong:rgba(255,255,255,.10);
+  --card:rgba(255,255,255,.045); --card-hi:rgba(255,255,255,.08);
+  --edge:rgba(255,255,255,.10); --edge-card:rgba(255,255,255,.08);
+  --sheen:none;
+  --sheen-panel:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,0) 30%);
+  --card-sh:none;
+  --btn:rgba(255,255,255,.08); --btn-sh:none;
+  --field:rgba(255,255,255,.06); --field-sh:inset 0 0 0 1px rgba(255,255,255,.14);
+  --stage:#0C0D11;
+  --hair:rgba(255,255,255,.08); --hair2:rgba(255,255,255,.15);
+  --ink1:#F1F2F4; --ink2:#B9BDC5; --ink3:#A0A6AF; --ink4:#6A6F79;
+  --amber-grad:linear-gradient(180deg,#F0B347,#D8952A);
+  --amber:#E2A43A; --amber-flat:#E2A43A; --amber-edge:rgba(0,0,0,.35); --amber-t:#F2B65C;
+  --amber-soft:rgba(226,164,58,.14);
+  --mint:#5FD3A6;  --mint-t:#5FD3A6;  --mint-soft:rgba(95,211,166,.12);
+  --lilac:#B7A8F5; --lilac-t:#B7A8F5; --lilac-soft:rgba(140,120,235,.14);
+  --risk:#E5574B;  --risk-t:#F58A80;  --risk-soft:rgba(229,87,75,.14);
+  --sh1:0 1px 1px rgba(0,0,0,.3),0 12px 36px rgba(0,0,0,.4);
+  --sh2:0 2px 6px rgba(0,0,0,.5),0 30px 90px rgba(0,0,0,.6);
+  --blur:28px; --sat:1.25;
+}
+
+/* ------------------------------------------------- the degraded state ---- *
+ * Blur is the first thing to go, not the last. Transcription can take every
+ * core on the machine, and a window that stutters during the meeting it is
+ * recording is a worse failure than a flat one — so this is a real runtime
+ * state the app can enter, not only a preference.
+ *
+ * The two glass surfaces step up to near-opaque so the wash shows only at the
+ * window's edges and rounded corners. Card layering and hairlines stay, so the
+ * hierarchy survives; only the frosted read of the wash is lost. Every ratio in
+ * this state is equal or higher, because the surfaces are more opaque and the
+ * wash contributes less. No re-layout, no colour change, and the blur radius is
+ * never transitioned between the two.                                        */
+:root[data-blur="off"] {
+  --glass:rgba(243,241,238,.93);
+  --panel:rgba(253,252,251,.98);
+  --sheen-panel:none;
+  --blur:0px; --sat:1;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-blur="off"]:not([data-appearance="light"]) {
+    --glass:rgba(20,22,28,.94);
+    --panel:rgba(22,24,30,.97);
+  }
+}
+:root[data-appearance="dark"][data-blur="off"] {
+  --glass:rgba(20,22,28,.94);
+  --panel:rgba(22,24,30,.97);
+}
+
+/* Someone who has asked the OS for less transparency has already answered
+   this question; it is not a preference the app gets to re-ask. */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass:rgba(243,241,238,.93);
+    --panel:rgba(253,252,251,.98);
+    --sheen-panel:none;
+    --blur:0px; --sat:1;
+  }
+}
+@media (prefers-reduced-transparency: reduce) and (prefers-color-scheme: dark) {
+  :root:not([data-appearance="light"]) {
+    --glass:rgba(20,22,28,.94);
+    --panel:rgba(22,24,30,.97);
+  }
+}
+
+
+/* ============================================== one palette, not two ======
+ * The glass set above is now the palette. Everything written before it — the
+ * screens, the cards, the settings rows — refers to the old names, so those
+ * names become aliases rather than a second set of values. One ground, one
+ * ink, one set of hairlines, whichever appearance is on.
+ *
+ * The triple `:root` is deliberate and temporary. The old values are declared
+ * on `:root:not([data-appearance="light"])` and `:root[data-appearance="dark"]`,
+ * both (0,2,0); a plain `:root` here would lose to them in dark and the app
+ * would run split-palette in one appearance only, which is worse than either
+ * palette on its own. Three classes of the same pseudo-class is the cheapest
+ * way to sit above both without touching the audited blocks.
+ *
+ * When the port is finished those blocks are dead and should be deleted, and
+ * this selector goes back to a plain `:root`.                              */
+:root:root:root {
+  --paper:      var(--bg);
+  --paper-2:    var(--panel-flat);
+  --wash:       var(--glass-strong);
+
+  --ink:        var(--ink1);
+  --ink-2:      var(--ink2);
+  --ink-3:      var(--ink3);
+  --ink-4:      var(--ink4);
+
+  --line:       var(--hair);
+  --line-2:     var(--hair2);
+
+  --amber-l:       var(--amber-flat);
+  --amber-text:    var(--amber-t);
+  --amber-on-soft: var(--amber-t);
+  --mint-text:     var(--mint-t);
+  --risk-text:     var(--risk-t);
+
+  --shadow:     var(--sh1);
+  --shadow-lg:  var(--sh2);
+}

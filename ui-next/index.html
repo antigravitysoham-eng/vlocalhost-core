@@ -43,20 +43,7 @@
 
 <div class="app">
   <div class="chrome">
-    <svg width="22" height="22" viewBox="0 0 200 200" aria-hidden="true">
-      <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stop-color="#CA8A04"/><stop offset="55%" stop-color="#EAB308"/>
-        <stop offset="100%" stop-color="#FACC15"/></linearGradient></defs>
-      <rect width="200" height="200" rx="44" fill="url(#g)"/>
-      <g transform="translate(19.11 23.39) scale(0.7778)" fill="#fff">
-        <rect x="23" y="44" width="22" height="36" rx="11"/>
-        <rect x="54" y="79" width="22" height="42" rx="11"/>
-        <rect x="85" y="114" width="22" height="48" rx="11"/>
-        <rect x="116" y="79" width="22" height="42" rx="11"/>
-        <circle cx="158" cy="62" r="27"/><path d="M 143 79 L 131 100 L 163 81 Z"/>
-      </g>
-    </svg>
-    <span class="t" id="chrome-title">Vlocalhost AI</span>
+    <span class="t" id="chrome-title">Recording</span>
     <!-- Appearance. Three states, not two: "System" is the default and keeps
          dark-mode.md's rule that an app answers the systemwide choice. The
          other two are for somebody who has decided. One cycling button rather
@@ -70,6 +57,25 @@
 
   <div class="shell">
     <nav class="nav" aria-label="Sections">
+      <!-- The mark sits in the sidebar, not the top bar: the design puts it
+           at the head of the column it belongs to, and the band above the
+           content is for the screen you are on. -->
+      <div class="brand">
+  <svg width="26" height="26" viewBox="0 0 200 200" aria-hidden="true">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#CA8A04"/><stop offset="55%" stop-color="#EAB308"/>
+  <stop offset="100%" stop-color="#FACC15"/></linearGradient></defs>
+  <rect width="200" height="200" rx="44" fill="url(#g)"/>
+  <g transform="translate(19.11 23.39) scale(0.7778)" fill="#fff">
+  <rect x="23" y="44" width="22" height="36" rx="11"/>
+  <rect x="54" y="79" width="22" height="42" rx="11"/>
+  <rect x="85" y="114" width="22" height="48" rx="11"/>
+  <rect x="116" y="79" width="22" height="42" rx="11"/>
+  <circle cx="158" cy="62" r="27"/><path d="M 143 79 L 131 100 L 163 81 Z"/>
+  </g>
+  </svg>
+        <span class="wordmark">Vlocalhost</span>
+      </div>
       <div class="g">Session</div>
       <button data-screen="record" aria-current="page"><span class="dot"></span>Recording</button>
       <button data-screen="library"><span class="dot"></span>Library</button>
@@ -78,89 +84,119 @@
       <div class="g">Machine</div>
       <button data-screen="assistants"><span class="dot"></span>Assistants</button>
       <button data-screen="settings"><span class="dot"></span>Settings</button>
-      <div class="foot"><b></b>ON-DEVICE</div>
+      <div class="foot"><b></b>On-device</div>
+      <!-- View controls, in the sidebar where window chrome belongs. Appearance
+           delegates to the control in the top bar rather than keeping a second
+           copy of the state: that one already cycles system/light/dark and
+           writes the choice to settings, so this is a second way to reach it,
+           not a second source of truth. Blur is a view preference only — it
+           never leaves the browser's localStorage, because nothing about how
+           frosted a panel looks belongs in the engine's settings file. -->
+      <div class="viewctl">
+        <button class="vbtn" id="ui-theme" type="button" title="Appearance"></button>
+        <button class="vbtn" id="ui-blur" type="button" title="Glass blur"></button>
+      </div>
     </nav>
 
     <div class="body" id="body">
 
       <!-- ============================================ RECORDING ========== -->
       <section class="screen" id="screen-record">
-        <span class="pill live" id="live-pill"><b></b><span id="live-text">Idle · 0 bytes out</span></span>
-        <h1 class="h" id="rec-title">Your meetings never leave this machine.</h1>
-        <div class="meta lede" id="rec-meta">Nothing is uploaded. No account, and no bot in the call.</div>
+        <!-- ================================================ THE STAGE ====
+             The capture surface, and the one opaque thing in the window. It
+             carries the meter and the sentence being said, and a translucent
+             ground under moving type is where contrast and compositing cost
+             fail at the same time -- so it is a solid panel, it is never
+             blurred, and it never overlaps the two blurred regions.
 
-        <!-- The meter is the page. -->
-        <div class="wave" id="wave" role="img" aria-label="Input level meter"></div>
-        <div class="scale">
-          <span>−60 dB</span>
-          <span id="gate">Silence gated · nothing transcribed yet</span>
-          <span>0 dB</span>
-        </div>
-
-        <!-- Asked on first open, in the app rather than in setup: setup is
-             plumbing and blocks the window, and this is a question about the
-             person with a perfectly good empty answer. Shown once; answering
-             or dismissing both close it for good. -->
-        <div class="firstrun" id="firstrun" hidden></div>
-
-        <!-- Checked once, when the window opens, and shown only when the answer
-             is bad. Recording works without a notes engine and the transcript
-             is always saved -- but the summary is not, and finding that out
-             after sitting through an hour-long meeting is the worst possible
-             moment to learn it. So it is said before the button, not after the
-             recording. -->
-        <div class="notready" id="notready" hidden>
-          <strong>Recording works. Notes will not be written yet.</strong>
-          <span id="notready-why"></span>
-          <button class="btn" id="notready-fix">Open Settings</button>
-        </div>
-
-        <div class="actions">
-          <button class="btn primary" id="record">● Start recording</button>
-          <button class="btn" id="open-folder">Open notes folder</button>
-          <!-- settings.md › Task-specific options: "prefer letting people modify
-               task-specific options without going to your settings area … Putting
-               this type of option in a separate settings area disconnects it from
-               its context". What is being captured is a property of this
-               recording, so it is changed here, beside the meter that shows it.
-               Settings holds the same control and the two stay in step. -->
-          <span class="inline-field">
-            <label for="rec-source">Source</label>
-            <select id="rec-source" class="sel sm" data-setting="CAPTURE_MODE">
-              <option value="both">Mic + system audio</option>
-              <option value="mic">Microphone only</option>
-              <option value="system">System audio only</option>
-            </select>
-          </span>
-        </div>
-
-        <!-- Collapsible. -->
-        <div class="sect">
-          <button class="disclose" aria-expanded="true" aria-controls="transcript">
-            <span class="tri" aria-hidden="true">▶</span> Live transcript
-          </button>
-          <div class="body-in" id="transcript" role="log" aria-live="polite" aria-relevant="additions">
-            <div class="lines" id="lines">
-              <div class="ln hint"><span class="ts"></span><p>Silence is ignored — lines appear when someone speaks.</p></div>
+             Every id in here was already in this screen: the stage is a new
+             arrangement of the same parts, not new parts, so app.js keeps
+             driving the meter, the title, the gate line and the button
+             exactly as it did. -->
+        <div class="stage" id="stage">
+          <div class="stage-head">
+            <div class="stage-id">
+              <h1 class="h" id="rec-title">Your meetings never leave this machine.</h1>
+              <div class="meta lede" id="rec-meta">Recording, transcription and notes all run locally.</div>
             </div>
+            <span class="pill live" id="live-pill"><b></b><span id="live-text">Idle · 0 bytes out</span></span>
+            <button class="stage-toggle" id="stage-toggle" aria-expanded="true"
+                    aria-controls="screen-record" title="Show transcript and notes">⤡</button>
+          </div>
+
+          <div class="stage-mid">
+            <div class="wave" id="wave" role="img" aria-label="Input level meter"></div>
+            <!-- What is being said, large. #said-final is decoded and settled;
+                 #said-prov is the tail the model has not finished with, and it
+                 is deliberately under the contrast floor because it is never
+                 the only copy -- the same words arrive at full ink in the Live
+                 transcript below a moment later. -->
+            <p class="said" id="said">
+              <span id="said-final">Nothing is captured until you press record.</span><span
+                    id="said-prov" class="prov"></span>
+            </p>
+          </div>
+
+          <div class="stage-foot">
+            <span class="gate" id="gate">Silence gated · nothing transcribed yet</span>
+            <span class="clock" id="clock">00:00</span>
+            <button class="btn primary rec-dot" id="record" data-state="idle">● Start recording</button>
           </div>
         </div>
 
-        <div class="sect">
-          <button class="disclose" aria-expanded="true" aria-controls="pending">
-            <span class="tri" aria-hidden="true">▶</span> Summarizing
-          </button>
-          <div class="body-in" id="pending">
-            <div class="empty" id="pending-empty">
-              <strong>Notes appear here when a recording stops.</strong>
-              Summarizing runs in the background, so you can start the next meeting straight away.
+        <div class="under">
+          <div class="actions">
+            <button class="btn" id="open-folder">Open notes folder</button>
+            <!-- settings.md › Task-specific options: what is captured is a
+                 property of this recording, so it is changed here, beside the
+                 meter that shows it. Settings holds the same control. -->
+            <span class="inline-field">
+              <label for="rec-source">Source</label>
+              <select id="rec-source" class="sel sm" data-setting="CAPTURE_MODE">
+                <option value="both">Mic + system audio</option>
+                <option value="mic">Microphone only</option>
+                <option value="system">System audio only</option>
+              </select>
+            </span>
+          </div>
+
+          <div class="firstrun" id="firstrun" hidden></div>
+
+          <!-- Said before the button, not after the recording: finding out that
+               notes cannot be written after sitting through an hour-long
+               meeting is the worst possible moment to learn it. -->
+          <div class="notready" id="notready" hidden>
+            <strong>Recording works. Notes will not be written yet.</strong>
+            <span id="notready-why"></span>
+            <button class="btn" id="notready-fix">Open Settings</button>
+          </div>
+
+          <div class="sect">
+            <button class="disclose" aria-expanded="true" aria-controls="transcript">
+              <span class="tri" aria-hidden="true">▶</span> Live transcript
+            </button>
+            <div class="body-in" id="transcript" role="log" aria-live="polite" aria-relevant="additions">
+              <div class="lines" id="lines">
+                <div class="ln hint"><span class="ts"></span><p>Silence is ignored — lines appear when someone speaks.</p></div>
+              </div>
             </div>
-            <div class="rowlist" id="rows" hidden></div>
+          </div>
+
+          <div class="sect">
+            <button class="disclose" aria-expanded="true" aria-controls="pending">
+              <span class="tri" aria-hidden="true">▶</span> Summarizing
+            </button>
+            <div class="body-in" id="pending">
+              <div class="empty" id="pending-empty">
+                <strong>Notes appear here when a recording stops.</strong>
+                Summarizing runs in the background, so you can start the next meeting straight away.
+              </div>
+              <div class="rowlist" id="rows" hidden></div>
+            </div>
           </div>
         </div>
       </section>
 
-      <!-- ============================================ ONE MEETING ======== -->
       <section class="screen" id="screen-meeting" hidden>
         <button class="btn back" id="back">← Library</button>
         <span class="pill warm" id="m-pill">Follow-up ready to draft</span>
@@ -225,7 +261,7 @@
             <span>Show the full notes</span>
           </label>
         </div>
-        <div class="rowlist" id="library-rows"></div>
+        <div class="liblist" id="library-rows"></div>
       </section>
 
       <!-- ============================================ ASK ================ -->
@@ -235,26 +271,26 @@
            Both are visible below — the scope line above an answer, and the
            meeting plus the second on every line of it. -->
       <section class="screen" id="screen-ask" hidden>
-        <h1 class="h">Ask</h1>
-        <div class="meta">Questions that span meetings</div>
+        <h1 class="h">Ask across meetings.</h1>
+        <div class="meta">Every answer says what it searched, and every line names the
+             meeting it came from.</div>
 
-        <!-- What is searchable, stated before anything is asked. Answers read
-             cached packs and never extract, which is why they arrive in
-             milliseconds and why an unindexed meeting is simply absent. -->
-        <div class="strip" id="index-strip">
-          <div class="strip-body">
-            <div class="strip-t" id="index-t">38 of 41 meetings indexed</div>
-            <div class="strip-s" id="index-s">3 have no context pack yet, so nothing in them can be searched or cited.</div>
+        
+
+        <div class="ask-aura" id="ask-aura">
+          <div class="aura-bloom" aria-hidden="true"><i></i></div>
+          <div class="aura-edge">
+            <i class="aura-ring" aria-hidden="true"></i>
+            <div class="aura-in">
+              <form class="asker" id="ask-form">
+            <label class="sr" for="q">Your question</label>
+            <input id="q" class="input q" type="text" autocomplete="off"
+                   placeholder="What do I still owe Priya?">
+            <button class="btn primary" type="submit" id="ask-btn">Ask</button>
+          </form>
+            </div>
           </div>
-          <button class="btn" id="index-btn">Index 3 meetings</button>
         </div>
-
-        <form class="asker" id="ask-form">
-          <label class="sr" for="q">Your question</label>
-          <input id="q" class="input q" type="text" autocomplete="off"
-                 placeholder="What do I still owe Priya?">
-          <button class="btn primary" type="submit" id="ask-btn">Ask</button>
-        </form>
 
         <!-- generative-ai.md › Inputs: "offer diverse, predefined example inputs
              that hint at what's possible for a feature". Each of these is a real
@@ -268,6 +304,18 @@
           <button class="chip" type="button" data-q="What has gone stale in the last 14 days?">What's gone stale</button>
         </div>
 
+        <!-- What is searchable, stated before anything is asked. Answers read
+             cached packs and never extract, which is why they arrive in
+             milliseconds and why an unindexed meeting is simply absent. -->
+        <div class="strip" id="index-strip">
+          <div class="strip-body">
+            <div class="index-ticks" id="index-ticks" aria-hidden="true"></div>
+            <div class="strip-t" id="index-t">38 of 41 meetings indexed</div>
+            <div class="strip-s" id="index-s">3 have no context pack yet, so nothing in them can be searched or cited.</div>
+          </div>
+          <button class="btn" id="index-btn">Index 3 meetings</button>
+        </div>
+
         <div id="answer" aria-live="polite">
           <div class="empty" id="ask-empty">
             <strong>Nothing has been asked yet.</strong>
@@ -275,6 +323,8 @@
             leaves it, and no answer is written by a model: every line below one names the
             meeting and the second it came from.
           </div>
+
+        
         </div>
       </section>
 

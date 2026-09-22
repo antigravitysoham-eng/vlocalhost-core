@@ -20,13 +20,17 @@ $$('.screen').forEach(s => (screens[s.id.replace('screen-', '')] = s));
 
 function show(name) {
   Object.entries(screens).forEach(([k, s]) => (s.hidden = k !== name));
-  $$('.nav button').forEach(b => {
+  /* [data-screen] matters: the sidebar also holds the appearance and blur
+     buttons, and they name no screen. Without the attribute in the selector a
+     click on either called show(undefined), which hid every screen and left
+     the content panel blank. */
+  $$('.nav button[data-screen]').forEach(b => {
     const on = b.dataset.screen === name;
     on ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current');
   });
   $('#body').scrollTop = 0;
 }
-$$('.nav button').forEach(b => b.addEventListener('click', () => show(b.dataset.screen)));
+$$('.nav button[data-screen]').forEach(b => b.addEventListener('click', () => show(b.dataset.screen)));
 $('#back').addEventListener('click', () => show('library'));
 
 /* ------------------------------------------------------------ disclosure */
@@ -169,6 +173,26 @@ function stop() {
 const rows = $('#rows'), pendingEmpty = $('#pending-empty'), libraryRows = $('#library-rows');
 const meetings = [];
 
+/* A meeting that has just been saved joins the library immediately, and the
+   library is grouped now -- so it goes into today's card, creating it if this
+   is the first meeting of the day, rather than being prepended loose above the
+   first heading where it would sit outside every card. */
+function libraryInsert(m) {
+  let head = libraryRows.firstElementChild;
+  let list = head && head.classList.contains('lib-group') ? head.nextElementSibling : null;
+  const isToday = head && head.firstChild && head.firstChild.textContent === 'Today';
+  if (!isToday || !list || !list.classList.contains('rowlist')) {
+    head = el('div', 'lib-group');
+    head.append(document.createTextNode('Today'), el('span', null, '0 meetings'));
+    list = el('div', 'rowlist');
+    libraryRows.prepend(head, list);
+  }
+  rowFor(m, list);
+  const n = list.children.length;
+  const tag = head.querySelector('span');
+  if (tag) tag.textContent = n + (n === 1 ? ' meeting' : ' meetings');
+}
+
 function rowFor(m, into) {
   const row = el('button', 'r');
   row.type = 'button';
@@ -234,7 +258,7 @@ async function openMeeting(m) {
     m.notes = await driver.notesFor(m);
     if (m.notes.title) m.title = m.notes.title;
   }
-  $('#chrome-title').textContent = (m.title || 'Meeting').toUpperCase();
+  $('#chrome-title').textContent = m.title || 'Meeting';
   $('#m-title').textContent = m.title;
   const at = new Date(m.at);
   $('#m-meta').textContent = [
@@ -538,7 +562,7 @@ function scopeLine() {
   const s = el('div', 'scope');
   s.append(document.createTextNode('Searched '));
   s.append(el('b', null, String(ARCHIVE.indexed)));
-  s.append(document.createTextNode(` of ${ARCHIVE.total} meetings`));
+  s.append(document.createTextNode(` of ${ARCHIVE.total} meeting${ARCHIVE.total === 1 ? '' : 's'}`));
   const missing = ARCHIVE.total - ARCHIVE.indexed;
   if (missing) {
     s.append(el('span', 'gap', `· ${missing} not indexed, and not included below`));
@@ -565,6 +589,25 @@ function crossFact(f) {
 
 function renderAnswer(hit, question) {
   answerHost.replaceChildren();
+  /* Nothing has a context pack, so nothing can be searched or cited. Said
+     plainly, and before the question is blamed: "nothing matched" would imply
+     an archive was read, and none was. Core extracts no packs -- that is
+     vlocalhost_pro's job -- so this is the honest state of this build rather
+     than a failure of the question. */
+  if (!ARCHIVE.indexed) {
+    const e = el('div', 'empty');
+    e.append(el('strong', null, 'No meeting can be searched yet.'));
+    e.append(document.createTextNode(
+      ARCHIVE.total
+        ? `None of the ${ARCHIVE.total} meeting${ARCHIVE.total === 1 ? '' : 's'} on this `
+          + 'machine has a context pack, so there is nothing to cite. Answers are '
+          + 'assembled only from extracted facts — never written by a model — which '
+          + 'is why an unindexed meeting is simply absent rather than guessed at.'
+        : 'Record a meeting first. Answers are assembled only from extracted facts, '
+          + 'never written by a model.'));
+    answerHost.append(scopeLine(), e);
+    return;
+  }
   if (!hit) {
     /* generative-ai.md › Outputs: "Help people improve requests when blocked or
        undesirable results occur … coaching people how to be more successful
@@ -697,18 +740,48 @@ drawHosts();
 drawAudit();
 
 /* How much of the archive is in reach, said as a count of meetings rather than
-   as a number of days — days are the setting, meetings are the consequence. */
-const INSIDE = { 0: 41, 7: 4, 30: 12, 90: 27, 180: 36 };
+   as a number of days — days are the setting, meetings are the consequence.
+ *
+ * These counts were a literal: { 0: 41, 7: 4, 30: 12, 90: 27, 180: 36 }. That
+ * is the same invented archive ARCHIVE carried, and it outlived the change
+ * that emptied ARCHIVE -- so this line still read "all 41 of them" on a
+ * machine holding none, and once ARCHIVE.total was 0 the other scopes said
+ * "4 of 0 meetings. The other -4 are refused." A negative count is the kind of
+ * thing a reader notices before we do.
+ *
+ * Counted off the library now, which is the same list the Library screen
+ * filters, so the two can never disagree. */
 const scopeSel = $('#scope-days'), scopeHint = $('#scope-hint');
+
+function inReach(days) {
+  /* `libRows` is declared further down with `let`, so it cannot be read before
+     that line runs. Nothing calls this until the boot block at the foot of the
+     file, by which time it exists -- but a guard is cheaper than a rule. */
+  let rows;
+  try { rows = libRows; } catch (e) { return 0; }
+  if (!Array.isArray(rows)) return 0;
+  const n = Number(days);
+  if (!n) return rows.length;
+  const cutoff = Date.now() - n * 864e5;
+  return rows.filter(r => new Date(r.at).getTime() >= cutoff).length;
+}
+
 function drawScope() {
-  const d = scopeSel.value, n = INSIDE[d];
-  scopeHint.textContent = d === '0'
-    ? `Every meeting on this machine — all ${ARCHIVE.total} of them.`
-    : `${n} of ${ARCHIVE.total} meetings. The other ${ARCHIVE.total - n} are refused, `
+  const d = scopeSel.value;
+  const total = ARCHIVE.total, n = inReach(d);
+  if (!total) {
+    scopeHint.textContent = 'Nothing recorded yet, so there is nothing to reach back to.';
+    return;
+  }
+  scopeHint.textContent = Number(d) === 0
+    ? `Every meeting on this machine — all ${total} of them.`
+    : `${n} of ${total} meetings. The other ${Math.max(0, total - n)} are refused, `
       + 'and the refusal says so rather than pretending they do not exist.';
 }
 scopeSel.addEventListener('change', drawScope);
-drawScope();
+/* Deliberately not called here. At this point ARCHIVE still holds its
+   placeholder and `libRows` is in its temporal dead zone; the boot block at
+   the foot of the file calls it once both are real. */
 
 const MCP_JSON = `{
   "mcpServers": {
@@ -820,7 +893,7 @@ const demo = {
       m.state = 'ready';
       m.notes = NOTES;
       paint(m);
-      rowFor(m, libraryRows);            // it joins the library once it exists
+      libraryInsert(m);            // it joins the library once it exists
       this.busy = false;
       renumber();
       this.pump();
@@ -932,7 +1005,7 @@ const live = {
       m.base = (p.summary || p.transcript || '')
         .replace(/-(summary|transcript)\.(txt|md)$/, '') || null;
       m.notes = null;                       // parsed when it is opened
-      rowFor(m, libraryRows);
+      libraryInsert(m);
     } else if (p.state === 'failed') {
       clearInterval(m._t);
       m.state = 'failed';
@@ -1064,7 +1137,7 @@ if (!window.pywebview) {
     title: 'Kickoff — Northwind', at: Date.now() - 864e5, duration: 2460,
     state: 'ready', notes: NOTES,
   });
-  rowFor(meetings[0], libraryRows);
+  libraryInsert(meetings[0]);
 }
 
 /* ================================================== the library tally ==== *
@@ -1931,8 +2004,41 @@ function withinRange(when) {
 function drawLibrary() {
   libraryRows.replaceChildren();
   const shown = libRows.filter(r => withinRange(r.at));
-  /* rowFor prepends, so the newest has to go in last. */
-  for (const m of [...shown].reverse()) rowFor(m, libraryRows);
+
+  /* Grouped by day. Forty meetings in one undifferentiated column is a column,
+     not a library -- the date is how anybody actually looks for a meeting they
+     half-remember. The buckets are relative where that is how people speak
+     ("yesterday") and absolute once it stops being ("Earlier in September"),
+     because "23 days ago" is not a thing anyone thinks. */
+  const dayLabel = (when) => {
+    const d = new Date(when), now = new Date();
+    const midnight = new Date(now); midnight.setHours(0, 0, 0, 0);
+    const days = Math.floor((midnight - new Date(when).setHours(0, 0, 0, 0)) / 864e5);
+    if (days <= 0) return 'Today';
+    if (days === 1) return 'Yesterday';
+    if (days < 7) return 'This week';
+    if (d.getFullYear() === now.getFullYear())
+      return 'Earlier in ' + d.toLocaleDateString([], { month: 'long' });
+    return d.toLocaleDateString([], { month: 'long', year: 'numeric' });
+  };
+
+  /* Newest first sets the order of the headings as well as of the rows. */
+  const groups = new Map();
+  for (const m of [...shown].reverse()) {
+    const key = dayLabel(m.at);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(m);
+  }
+  for (const [label, items] of groups) {
+    const head = el('div', 'lib-group');
+    head.append(document.createTextNode(label));
+    head.append(el('span', null, items.length + (items.length === 1 ? ' meeting' : ' meetings')));
+    libraryRows.append(head);
+    const list = el('div', 'rowlist');
+    libraryRows.append(list);
+    /* rowFor prepends, so the newest has to go in last. */
+    for (const m of [...items].reverse()) rowFor(m, list);
+  }
   if (libFull) for (const m of shown) showFull(m);
 
   const box = $('#library-filter');
@@ -2055,3 +2161,293 @@ if ($('#appearance')) {
   };
 }
 paintAppearance();
+
+
+/* ======================================================== the stage ========
+ * Feeds the capture stage from what the rest of this file already produces.
+ * Nothing above changes: the transcript is still the record, `line()` and
+ * `interim()` still own `#lines`, and this only mirrors the newest of each
+ * into the large type on the stage.
+ *
+ * Written as an observer rather than as calls inside `line()`/`interim()` so
+ * that the stage cannot fail in a way that costs a transcript line. If any of
+ * this throws, the words are still in `#lines` and still on their way to disk.
+ */
+(() => {
+  const screen = $('#screen-record');
+  const linesEl = $('#lines'), said = $('#said-final'), prov = $('#said-prov');
+  const clock = $('#clock'), rec = $('#record'), toggle = $('#stage-toggle');
+  if (!screen || !linesEl || !said || !prov) return;
+
+  const IDLE = 'Nothing is captured until you press record.';
+
+  /* The newest settled line, and the tail that is still being decoded. */
+  /* The engine hands the page a whole formatted line -- "[22:27:29] You (en):
+     two, three, four" -- and the transcript below wants every part of that.
+     The stage wants the sentence: it is set in 24px and the timestamp and the
+     speaker are already on screen, in the meta line and in the transcript. The
+     prefix is only removed when it really is one: a bracketed clock, and then
+     at most a few words before the colon, so a sentence that happens to
+     contain a colon keeps all of itself. */
+  const STAMP = /^\[\d{2}:\d{2}:\d{2}\]\s*/;
+  const NAME = /^([^:]{1,32}):\s*/;
+  /* A speaker label looks like a name: a word or three, each capitalised, with
+     the transcriber's optional "(en)" tag allowed after it. Anything else is
+     the sentence itself -- "the plan is this: we ship Friday" keeps its opening
+     clause, which a bare "text before the first colon" rule would eat. */
+  const isName = (s) => {
+    const bare = s.replace(/\s*\([a-z]{2,3}\)\s*$/i, '').trim();
+    const words = bare.split(/\s+/);
+    return bare && words.length <= 3 && !/[.!?,;]/.test(bare)
+        && words.every(w => w[0] === w[0].toUpperCase() && /[A-Za-z]/.test(w[0]));
+  };
+  const spoken = (node) => {
+    let t = (node.textContent || '').trim().replace(STAMP, '');
+    const m = NAME.exec(t);
+    if (m && isName(m[1])) t = t.slice(m[0].length);
+    return t.trim();
+  };
+
+  const mirror = () => {
+    const finals = [...linesEl.querySelectorAll('.ln:not(.interim):not(.hint) p')];
+    const last = finals[finals.length - 1];
+    const guess = linesEl.querySelector('.ln.interim p');
+    said.textContent = last ? spoken(last) || IDLE : IDLE;
+    prov.textContent = guess ? spoken(guess) : '';
+  };
+  new MutationObserver(mirror).observe(linesEl, { childList: true, subtree: true, characterData: true });
+
+  /* The clock and the button glyph both already exist elsewhere — `#rec-meta`
+     carries "HH:MM → now · MM:SS · source" while recording, and app.js rewrites
+     the button's label on every state change. Read them rather than keeping a
+     second timer that could disagree with the first. */
+  const meta = $('#rec-meta');
+  const tick = () => {
+    const m = meta && /·\s*(\d{2}:\d{2})\s*·/.exec(meta.textContent || '');
+    if (clock) clock.textContent = m ? m[1] : '00:00';
+    if (rec) rec.dataset.state = /stop/i.test(rec.textContent || '') ? 'live' : 'idle';
+  };
+  setInterval(tick, 500); tick();
+
+  /* Fill the window, or step back so the transcript and the notes are visible.
+     Anything the app needs to *say* — the first-run question, the warning that
+     notes cannot be written — lives below the stage, so the stage is never
+     allowed to cover it. That check runs on every toggle and on a timer,
+     because either can appear long after the window opened. */
+  const blocked = () => ['#firstrun', '#notready'].some(sel => {
+    const n = $(sel); return n && !n.hidden;
+  });
+  const apply = full => {
+    const on = full && !blocked();
+    screen.dataset.stage = on ? 'full' : 'compact';
+    if (toggle) {
+      toggle.setAttribute('aria-expanded', String(on));
+      toggle.textContent = on ? '⌄' : '⌃';
+      toggle.title = on ? 'Show transcript and notes' : 'Fill the window';
+    }
+  };
+  let want = true;
+  toggle && toggle.addEventListener('click', () => { want = !want; apply(want); });
+  setInterval(() => apply(want), 700);
+  apply(want); mirror();
+})();
+
+
+/* The Ask scope bar: one tick per meeting, amber for indexed. Read off the
+   sentence the strip already writes rather than kept as a second copy of the
+   count, so the bar and the words can never disagree. Capped because a tick
+   thinner than a pixel is a smudge, not a count. */
+(() => {
+  const ticks = $('#index-ticks'), t = $('#index-t');
+  if (!ticks || !t) return;
+  const MAX = 60;
+  let last = '';
+  const draw = () => {
+    const text = t.textContent || '';
+    if (text === last) return;
+    last = text;
+    const m = /(\d+)\s+of\s+(\d+)/.exec(text);
+    ticks.replaceChildren();
+    if (!m) { ticks.hidden = true; return; }
+    const done = +m[1], all = +m[2];
+    if (!all) { ticks.hidden = true; return; }
+    ticks.hidden = false;
+    const n = Math.min(all, MAX);
+    const on = Math.round((done / all) * n);
+    for (let i = 0; i < n; i++) ticks.append(el('i', i < on ? 'on' : null));
+  };
+  new MutationObserver(draw).observe(t, { childList: true, characterData: true, subtree: true });
+  draw();
+})();
+
+
+/* ==================================================== the view controls ====
+ * Appearance and glass blur, in the sidebar.
+ *
+ * Appearance does not keep its own state: it clicks the control in the top bar,
+ * which already cycles system → light → dark, writes the choice to settings and
+ * repaints. Two buttons, one truth. Blur is different — it is a view
+ * preference, not a setting the engine has any business knowing, so it lives in
+ * localStorage and sets `data-blur` for tokens.css to pick up. Someone whose OS
+ * asks for reduced transparency has already answered, and that path is handled
+ * in CSS; this never overrides it upwards.
+ */
+(() => {
+  const themeBtn = $('#ui-theme'), blurBtn = $('#ui-blur');
+  const real = $('#appearance'), root = document.documentElement;
+  if (!themeBtn || !blurBtn) return;
+
+  const ICON = {
+    system: '<circle cx="12" cy="12" r="8.2"/><path d="M12 3.8v16.4" /><path d="M12 20.2a8.2 8.2 0 0 0 0-16.4z" fill="currentColor" stroke="none"/>',
+    light:  '<circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M4.2 12H2M22 12h-2.2M6.4 6.4 4.9 4.9M19.1 19.1l-1.5-1.5M17.6 6.4l1.5-1.5M4.9 19.1l1.5-1.5"/>',
+    dark:   '<path d="M20.5 13.2A8.4 8.4 0 1 1 10.8 3.5a6.6 6.6 0 0 0 9.7 9.7z"/>',
+    drop:   '<path d="M12 3.2s5.6 6 5.6 9.6a5.6 5.6 0 1 1-11.2 0C6.4 9.2 12 3.2 12 3.2z"/>',
+    slash:  '<path d="M4 20 20 4"/>'
+  };
+  const svg = inner => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    + 'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
+
+  const BLUR_KEY = 'vh.blur.2';   // v1 could persist a state nobody chose
+  let blurOff = false;
+  try { blurOff = localStorage.getItem(BLUR_KEY) === 'off'; } catch (e) { /* private window */ }
+
+  const paint = () => {
+    const mode = root.dataset.appearance || 'system';
+    themeBtn.innerHTML = svg(ICON[mode] || ICON.system);
+    themeBtn.title = mode === 'system' ? 'Appearance: follows the system'
+                   : mode === 'light' ? 'Appearance: light' : 'Appearance: dark';
+    themeBtn.setAttribute('aria-label', themeBtn.title);
+    /* Read what is actually rendering rather than what we last set. The OS can
+       force this off through prefers-reduced-transparency without telling us,
+       and a stored preference from an older session should never outrank the
+       token the page is really painting with. The icon cannot lie this way. */
+    const off = getComputedStyle(root).getPropertyValue('--blur').trim() === '0px';
+    blurBtn.innerHTML = svg(ICON.drop + (off ? ICON.slash : ''));
+    blurBtn.dataset.off = String(off);
+    blurBtn.title = off ? 'Glass blur off' : 'Glass blur on';
+    blurBtn.setAttribute('aria-label', blurBtn.title);
+  };
+
+  const applyBlur = (remember) => {
+    if (blurOff) root.dataset.blur = 'off'; else root.removeAttribute('data-blur');
+    if (remember) {
+      try { localStorage.setItem(BLUR_KEY, blurOff ? 'off' : 'on'); } catch (e) { /* ignore */ }
+    }
+    paint();
+  };
+
+  themeBtn.addEventListener('click', () => { if (real) real.click(); setTimeout(paint, 30); });
+  blurBtn.addEventListener('click', () => { blurOff = !blurOff; applyBlur(true); });
+
+  /* The top-bar control can change the appearance without going through this
+     button, so follow the attribute rather than assuming we caused it. */
+  new MutationObserver(paint).observe(root, { attributes: true, attributeFilter: ['data-appearance', 'data-blur'] });
+  applyBlur(false);
+})();
+
+
+/* The aurora brightens while an answer is being assembled. Driven off the Ask
+   button's own disabled state, which the form already toggles, so there is no
+   second idea of "busy" to fall out of step. */
+(() => {
+  const aura = $('#ask-aura'), btn = $('#ask-btn');
+  if (!aura || !btn) return;
+  const sync = () => aura.classList.toggle('busy', btn.disabled);
+  new MutationObserver(sync).observe(btn, { attributes: true, attributeFilter: ['disabled'] });
+  sync();
+})();
+
+
+/* ================================================= Ask, told the truth ====
+ * `ARCHIVE` shipped as { total: 41, indexed: 38 } and `ANSWERS` as a list of
+ * invented commitments owed by invented people in invented meetings. Both were
+ * written as a prototype seam -- the comment above ANSWERS says so -- but they
+ * are what the installed app was showing: a scope line claiming 41 meetings on
+ * a machine that might hold three, and citations to a "Northwind — contract"
+ * that never happened. A fabricated citation is worse than no answer, because
+ * it is indistinguishable from a real one.
+ *
+ * So the canned set is emptied and the counts come from the library. Core
+ * extracts no context packs, so `indexed` stays 0 and every question lands on
+ * the no-packs state in renderAnswer. The shapes the design draws are all
+ * still here; they just say what is true.
+ */
+(() => {
+  ANSWERS.length = 0;                 // nothing canned reaches a user
+  ARCHIVE.total = 0;
+  ARCHIVE.indexed = 0;                // Core has no extractor; Pro is the seam
+
+  /* The reach-back line is painted from ARCHIVE too, and it is drawn by
+     `drawScope` further up the file -- which used to run immediately, while
+     ARCHIVE still held 41. Emptying ARCHIVE here did not repaint it, so the
+     Assistants screen went on claiming "all 41 of them" until somebody
+     happened to change the dropdown. Drawn from here instead, once. */
+  const t = $('#index-t'), s = $('#index-s'), btn = $('#index-btn');
+  const libEl = $('#library-rows');
+
+  const paint = () => {
+    const n = ARCHIVE.total;
+    if (t) t.textContent = n
+      ? `0 of ${n} meeting${n === 1 ? '' : 's'} indexed`
+      : 'Nothing recorded yet';
+    if (s) s.textContent = n
+      ? `${n === 1 ? 'It has' : 'They have'} no context pack yet, so nothing in `
+        + `${n === 1 ? 'it' : 'them'} can be searched or cited.`
+      : 'Once a meeting is recorded it will be listed here.';
+    if (btn) {
+      /* The button used to animate a fake extraction. This build cannot make a
+         pack at all, so it says that instead of pretending to work. */
+      btn.disabled = true;
+      btn.textContent = 'Indexing needs Vlocalhost Pro';
+      btn.title = 'Extracting a context pack is not part of Core.';
+    }
+  };
+
+  /* The real count, read off the library rather than kept as a second tally. */
+  const recount = () => {
+    const n = libEl ? libEl.querySelectorAll('.r').length : 0;
+    /* Counted off the library, never off `meetings`. That array is seeded with
+       a demo row -- "Kickoff — Northwind" -- behind `if (!window.pywebview)`,
+       and pywebview injects its bridge *after* this script runs, so the guard
+       is false on every real launch and the row is always seeded. The live
+       driver replaces the library DOM but not the array, so counting it made a
+       fresh install claim one meeting it does not have: "all 1 of them", and
+       "0 of 1 meetings" on every other scope. */
+    let known = 0;
+    try { known = Array.isArray(libRows) ? libRows.length : 0; } catch (e) { known = 0; }
+    const next = Math.max(n, known);
+    if (next === ARCHIVE.total) return;
+    ARCHIVE.total = next;
+    paint();
+    drawScope();        // the reach-back line counts the same meetings
+  };
+  if (libEl) new MutationObserver(recount).observe(libEl, { childList: true, subtree: true });
+  setInterval(recount, 1500);
+  recount(); paint(); drawScope();
+})();
+
+
+/* The band names the screen you are on, and the sidebar shows a dot on
+   Recording while a capture is running — the design's one bullet, and the only
+   state worth marking from another screen. Both read the DOM the rest of the
+   app already maintains rather than keeping a parallel idea of "where am I". */
+(() => {
+  const title = $('#chrome-title'), root = document.documentElement;
+  const NAMES = { record: 'Recording', meeting: 'Meeting', library: 'Library',
+                  ask: 'Ask', assistants: 'Assistants', settings: 'Settings' };
+  const sync = () => {
+    const open = [...document.querySelectorAll('section.screen')]
+      .find(s => s.getBoundingClientRect().height > 0);
+    if (title && open && open.id !== 'screen-meeting') {
+      title.textContent = NAMES[open.id.replace('screen-', '')] || '';
+    }
+    /* #live-pill carries class="pill live" at all times — it is the element's
+       name, not its state — so the state comes from the record button, which
+       the stage module already keeps in step with what app.js writes there. */
+    const rec = $('#record');
+    root.dataset.rec = rec && rec.dataset.state === 'live' ? 'live' : 'idle';
+  };
+  document.addEventListener('click', () => setTimeout(sync, 60), true);
+  setInterval(sync, 700);
+  sync();
+})();
