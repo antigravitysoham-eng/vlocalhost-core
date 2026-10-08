@@ -377,7 +377,7 @@ def zip_bundle(staging, out_dir, target):
 #: there. A missing stylesheet does not raise — it ships a page with no design,
 #: which is worse than a crash because the build stays green.
 PAGE_FILES = ("index.html", "app.js", "app.css", "tokens.css", "api.py",
-              "shell.py")
+              "shell.py", "prompt.html", "meeting_prompt.py")
 
 
 def smoke_test(runtime, app_dir):
@@ -398,6 +398,7 @@ def smoke_test(runtime, app_dir):
         "import faster_whisper, numpy, requests",  # the heavy deps import
         "import sounddevice",                      # PortAudio binding loads
         "import vlocalhost, engine, settings, migrate, setup_wizard",
+        "import meeting_detect",                   # the call watcher
         # The window and its bridge. `available()` checks pywebview *and* that
         # the page is on disk, which is the pair that actually decides whether
         # anyone sees Aurora rather than the tkinter fallback.

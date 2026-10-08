@@ -261,11 +261,21 @@
 
   /* The capture stage is opaque in both appearances. It carries the waveform
      and the moving sentence, and a translucent surface under moving type is
-     where contrast and compositing cost fail at the same time. */
-  --stage:#141315;
-  --stage-ink:#F5F2EE;
-  --stage-ink2:rgba(245,242,238,.62);
-  --stage-ink3:rgba(245,242,238,.34);
+     where contrast and compositing cost fail at the same time.
+
+     It follows the appearance (8 Oct 2026). It used to be the one surface that
+     stayed dark in light mode, and in a light window that read as a black box
+     dropped into the page. Opaque is the rule that matters; dark was not.
+     --stage-ink2 is a solid colour, not a tint, so small mono text on it
+     measures 6.2:1 rather than depending on what is behind. */
+  --stage:#FFFFFF;
+  --stage-edge:rgba(28,25,22,.09);
+  --stage-ink:#1A1815;
+  --stage-ink2:#5E5952;
+  --stage-ink3:rgba(26,24,21,.28);
+  --stage-tint:rgba(28,25,22,.055);
+  --stage-tint-hi:rgba(28,25,22,.10);
+  --stage-ring:rgba(28,25,22,.18);
 
   --hair:rgba(28,25,22,.08); --hair2:rgba(28,25,22,.16);
   --ink1:#1A1815; --ink2:#413D38; --ink3:#67625B; --ink4:#948E86;
@@ -287,8 +297,8 @@
  * match the convention this file already uses above. --ink3 is #A0A6AF rather
  * than the light set's mirror because dark is the harder case here: the glass
  * is darker than the lit wash, so a card sitting on the brightest point of the
- * aurora is where 4.5 is won or lost. --stage-ink* are unchanged from light;
- * the stage is the one surface that does not move between appearances.      */
+ * aurora is where 4.5 is won or lost. The stage turns dark with the rest of
+ * the window, with the light ink it always had.                             */
 @media (prefers-color-scheme: dark) {
   :root:not([data-appearance="light"]) {
   --bg:#090A0E;
@@ -306,6 +316,13 @@
   --btn:rgba(255,255,255,.08); --btn-sh:none;
   --field:rgba(255,255,255,.06); --field-sh:inset 0 0 0 1px rgba(255,255,255,.14);
   --stage:#0C0D11;
+  --stage-edge:transparent;
+  --stage-ink:#F5F2EE;
+  --stage-ink2:rgba(245,242,238,.62);
+  --stage-ink3:rgba(245,242,238,.34);
+  --stage-tint:rgba(245,242,238,.08);
+  --stage-tint-hi:rgba(245,242,238,.14);
+  --stage-ring:rgba(255,255,255,.22);
   --hair:rgba(255,255,255,.08); --hair2:rgba(255,255,255,.15);
   --ink1:#F1F2F4; --ink2:#B9BDC5; --ink3:#A0A6AF; --ink4:#6A6F79;
   --amber-grad:linear-gradient(180deg,#F0B347,#D8952A);
@@ -336,6 +353,13 @@
   --btn:rgba(255,255,255,.08); --btn-sh:none;
   --field:rgba(255,255,255,.06); --field-sh:inset 0 0 0 1px rgba(255,255,255,.14);
   --stage:#0C0D11;
+  --stage-edge:transparent;
+  --stage-ink:#F5F2EE;
+  --stage-ink2:rgba(245,242,238,.62);
+  --stage-ink3:rgba(245,242,238,.34);
+  --stage-tint:rgba(245,242,238,.08);
+  --stage-tint-hi:rgba(245,242,238,.14);
+  --stage-ring:rgba(255,255,255,.22);
   --hair:rgba(255,255,255,.08); --hair2:rgba(255,255,255,.15);
   --ink1:#F1F2F4; --ink2:#B9BDC5; --ink3:#A0A6AF; --ink4:#6A6F79;
   --amber-grad:linear-gradient(180deg,#F0B347,#D8952A);

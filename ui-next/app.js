@@ -457,6 +457,32 @@ const applyHotkey = () => govern(hotkeyField, $('#set-hotkey-on').checked, null)
 $('#set-hotkey-on').addEventListener('change', applyHotkey);
 applyHotkey();
 
+/* Calls: the two follow-ups only mean something while the offer is on, and
+   "Never ask for" is a list of chips over the one hidden input that carries
+   the setting -- removing a chip is an ordinary change event on that input. */
+const meetFields = [$('#meet-stop-field'), $('#meet-ignore-field')];
+function applyCalls() {
+  govern(meetFields, $('#set-meet-prompt').checked, null);
+  const input = $('#set-meet-ignore');
+  const keys = (input.value || '').split(',').map(k => k.trim()).filter(Boolean);
+  const host = $('#meet-ignore-chips');
+  host.replaceChildren(...keys.map(k => {
+    const b = el('button', 'chip', k + '  ×');
+    b.type = 'button';
+    b.setAttribute('role', 'listitem');
+    b.title = `Ask about ${k} again`;
+    b.addEventListener('click', () => {
+      input.value = keys.filter(x => x !== k).join(', ');
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      applyCalls();
+    });
+    return b;
+  }));
+  $('#meet-ignore-empty').hidden = keys.length > 0;
+}
+$('#set-meet-prompt').addEventListener('change', applyCalls);
+applyCalls();
+
 /* What "Model" means depends on the engine above it, so the field says so
    instead of leaving a path in a box labelled for a model name. */
 const ENGINES = {
@@ -1044,7 +1070,7 @@ const live = {
     if (values.APPEARANCE) { appearance = values.APPEARANCE; paintAppearance(); }
     $('#thresh-out').textContent = Number($('#set-thresh').value).toFixed(2);
     sourceControls.forEach(o => (o.value = values.CAPTURE_MODE || 'both'));
-    applyDelivery(); applyHotkey();
+    applyDelivery(); applyHotkey(); applyCalls();
 
     /* The device list is this machine's, not a guess. entering-data.md:
        offer choices instead of requiring text entry. */
@@ -2208,12 +2234,29 @@ paintAppearance();
     return t.trim();
   };
 
+  /* How many earlier sentences stay on the stage above the newest. Enough to
+     follow a conversation without opening the transcript; few enough that the
+     newest line is still the thing the eye lands on. */
+  const KEEP = { full: 4, compact: 2 };
+  const prevEl = $('#said-prev');
+
   const mirror = () => {
     const finals = [...linesEl.querySelectorAll('.ln:not(.interim):not(.hint) p')];
     const last = finals[finals.length - 1];
     const guess = linesEl.querySelector('.ln.interim p');
     said.textContent = last ? spoken(last) || IDLE : IDLE;
     prov.textContent = guess ? spoken(guess) : '';
+    if (prevEl) {
+      const keep = KEEP[screen.dataset.stage === 'compact' ? 'compact' : 'full'];
+      const before = finals.slice(Math.max(0, finals.length - 1 - keep), -1);
+      prevEl.replaceChildren(...before.map((n, i) => {
+        const p = document.createElement('p');
+        p.textContent = spoken(n);
+        /* Older lines step back; the one just before the newest is clearest. */
+        p.style.opacity = String(0.55 + 0.45 * ((i + 1) / before.length));
+        return p;
+      }));
+    }
   };
   new MutationObserver(mirror).observe(linesEl, { childList: true, subtree: true, characterData: true });
 
@@ -2239,7 +2282,9 @@ paintAppearance();
   });
   const apply = full => {
     const on = full && !blocked();
+    const was = screen.dataset.stage;
     screen.dataset.stage = on ? 'full' : 'compact';
+    if (was !== screen.dataset.stage) mirror();   // it keeps more lines when full
     if (toggle) {
       toggle.setAttribute('aria-expanded', String(on));
       toggle.textContent = on ? '⌄' : '⌃';

@@ -131,6 +131,10 @@
                  is deliberately under the contrast floor because it is never
                  the only copy -- the same words arrive at full ink in the Live
                  transcript below a moment later. -->
+            <!-- The sentences just before it, so what was said stays on screen
+                 while the stage fills the window and the full transcript is
+                 folded away below. Mirrored from #lines; never the record. -->
+            <div class="said-prev" id="said-prev" aria-hidden="true"></div>
             <p class="said" id="said">
               <span id="said-final">Nothing is captured until you press record.</span><span
                     id="said-prov" class="prov"></span>
@@ -745,6 +749,42 @@
                        data-setting="HOTKEY" spellcheck="false">
                 <p class="hint">Taken from every other application on the machine, so pick one
                   nothing else wants.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sect">
+          <button class="disclose" aria-expanded="true" aria-controls="s-calls">
+            <span class="tri" aria-hidden="true">▶</span> Calls
+          </button>
+          <div class="body-in form" id="s-calls">
+            <div class="field">
+              <label for="set-meet-prompt">Offer to take notes when a call starts</label>
+              <div class="ctl">
+                <label class="sw"><input id="set-meet-prompt" type="checkbox" checked
+                  data-setting="MEETING_PROMPT"><i></i></label>
+                <p class="hint">When Zoom, Teams, Meet or another app opens the microphone, a small
+                  window asks. Nothing records until you click. Noticing reads which app holds
+                  the microphone — no audio, nothing sent.</p>
+                <p class="hint" id="meet-unsupported" hidden>Windows only in this release.</p>
+              </div>
+            </div>
+            <div class="field" id="meet-stop-field">
+              <label for="set-meet-stop">Save when the call ends</label>
+              <div class="ctl">
+                <label class="sw"><input id="set-meet-stop" type="checkbox" checked
+                  data-setting="MEETING_AUTO_STOP"><i></i></label>
+                <p class="hint">After a 20-second countdown you can cancel. Off, a recording runs
+                  until you stop it.</p>
+              </div>
+            </div>
+            <div class="field" id="meet-ignore-field">
+              <span class="label-as-text">Never ask for</span>
+              <div class="ctl">
+                <input id="set-meet-ignore" type="hidden" data-setting="MEETING_PROMPT_IGNORE">
+                <div class="chips" id="meet-ignore-chips" role="list"></div>
+                <p class="hint" id="meet-ignore-empty">No apps. Choose “Don't ask” on the offer to add one.</p>
               </div>
             </div>
           </div>

@@ -88,6 +88,13 @@ EDITABLE = (
     # so this is not a setting we can pick correctly on their behalf forever.
     "HOTKEY",
     "HOTKEY_ENABLED",
+    # Offer to record when another app opens the microphone, the apps never to
+    # offer for, and whether a recorded call saves itself when it ends. All
+    # three are choices about interruption, which only the person interrupted
+    # can make.
+    "MEETING_PROMPT",
+    "MEETING_PROMPT_IGNORE",
+    "MEETING_AUTO_STOP",
     # Refuse every outbound connection. Editable, and deliberately so: an
     # administrator setting this across a fleet is the whole point of it, and
     # a setting that can only be reached by editing config.py is reverted by

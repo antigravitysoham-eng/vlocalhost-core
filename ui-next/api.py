@@ -46,6 +46,11 @@ class Api:
         #: keeps the authoritative transcript; this is only what the page has
         #: already been told about, so a reload can be replayed into it.
         self._lines = []
+        #: The call watcher, set by the shell. None when opened any other way.
+        #: Private on purpose: pywebview walks every public attribute of the
+        #: bridge to expose it to the page, and this one leads to a .NET form --
+        #: which it crawled to the recursion limit, into the log, on every start.
+        self._meeting_prompt = None
 
     # -- wiring --------------------------------------------------------------
 
@@ -330,6 +335,9 @@ class Api:
             saved = settings.save(**clean)
         except Exception as e:
             return {"error": str(e)}
+        if self._meeting_prompt is not None and any(
+                k.startswith("MEETING_") for k in clean):
+            self._meeting_prompt.settings_changed()
         return {"saved": {k: _jsonable(v) for k, v in (saved or clean).items()}}
 
     def devices(self):

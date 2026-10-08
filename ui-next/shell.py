@@ -33,6 +33,7 @@ import webview
 import webview.menu as menu
 
 import api as api_mod
+import meeting_prompt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 INDEX = os.path.join(HERE, "index.html")
@@ -154,6 +155,12 @@ def _closing(api):
     that matters is the one below, and it happens after the GUI has gone.
     """
     global _shutdown
+    # The call watcher and its window go with the app. Stopping the watcher is
+    # a flag; the small window is destroyed off this thread, like everything
+    # else that touches a webview from here.
+    prompt = getattr(api, "_meeting_prompt", None)
+    if prompt is not None:
+        prompt.stop()
     _shutdown = threading.Thread(target=api.shutdown, daemon=True,
                                  name="vl-shutdown")
     _shutdown.start()
@@ -202,6 +209,10 @@ def main(argv=None):
         # platform-specific code is not a thing to add on the way into a
         # release. It is the same value the file has always carried.
         background_color="#FBFAFD",
+        # On this window only. Passed to webview.start() instead, pywebview
+        # puts the bar on *every* window -- the call offer grew a File/View
+        # menu across its top.
+        menu=_menu(api),
     )
     api.attach(window)
     window.events.closing += lambda: _closing(api)
@@ -216,7 +227,18 @@ def main(argv=None):
     # callback needs a window to push into.
     start_now = bool(argv and "--record-on-start" in argv)
 
+    # Noticing a call. Started once the GUI loop is up, because the offer is a
+    # second window and pywebview can only open one from a running loop.
+    prompt = meeting_prompt.MeetingPrompt(api)
+    api._meeting_prompt = prompt
+
     def begin():
+        try:
+            prompt.start()
+        except Exception as e:                      # noqa: BLE001
+            print(f"[meeting] could not start: {e}", flush=True)
+        if not start_now:
+            return
         try:
             api.start()
         except Exception as e:                      # noqa: BLE001
@@ -227,8 +249,7 @@ def main(argv=None):
     # bug the comment on `url` records. The page is local files and asks for
     # nothing over a socket; an app whose pill reads "0 bytes out" should not
     # open a port to draw itself.
-    webview.start(begin if start_now else None,
-                  menu=_menu(api), debug=debug, private_mode=True)
+    webview.start(begin, debug=debug, private_mode=True)
 
     # The window is gone; the summary being written when it closed is not. That
     # thread is a daemon, so without this the interpreter would exit out from

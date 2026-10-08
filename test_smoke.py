@@ -1290,6 +1290,78 @@ check("--diagnose reports network state", lambda: (
 
 
 # =====================================================================
+section("5b. Noticing a call")
+
+import meeting_detect as md  # noqa: E402
+
+
+def _uses(*keys):
+    table = {"zoom": md.classify(r"C:\Zoom\bin\Zoom.exe"),
+             "chrome": md.classify(r"C:\G\chrome.exe"),
+             "odd": md.classify(r"C:\x\Oddcaller.exe")}
+    return [table[k] for k in keys]
+
+
+def watch_offers_after_hold():
+    w = md.Watcher(titles=lambda: ["Meet - abc-defg-hij - Google Chrome"])
+    assert w.tick(0, _uses("zoom")) == [], "offered before the hold"
+    ev = w.tick(md.HOLD_SECONDS[md.CALL], _uses("zoom"))
+    assert [k for k, _ in ev] == ["start"], ev
+    assert w.tick(60, _uses("zoom")) == [], "offered twice for one call"
+    ev = w.tick(0.1, _uses("zoom", "chrome"))       # clock only matters per key
+    ev = w.tick(10, _uses("zoom", "chrome"))
+    assert ev and ev[0][1].label == "Google Meet in Chrome", ev
+
+
+def watch_ends_after_grace():
+    w = md.Watcher()
+    w.tick(0, _uses("zoom")); w.tick(5, _uses("zoom"))
+    assert w.tick(6, []) == [], "a device switch ended the call"
+    assert w.tick(6 + md.END_GRACE_SECONDS - 1, _uses("zoom")) == [], "came back"
+    w.tick(20, [])
+    ev = w.tick(20 + md.END_GRACE_SECONDS, [])
+    assert [k for k, _ in ev] == ["end"], ev
+
+
+def watch_respects_no():
+    w = md.Watcher(ignore=["zoom"])
+    w.tick(0, _uses("zoom"))
+    assert w.tick(100, _uses("zoom")) == [], "an ignored app was offered"
+    w = md.Watcher()
+    w.tick(0, _uses("zoom")); w.tick(5, _uses("zoom"))
+    w.snooze("zoom")
+    w.tick(6, []); w.tick(6 + md.END_GRACE_SECONDS, [])      # call ends
+    w.tick(30, _uses("zoom"))
+    assert w.tick(40, _uses("zoom")) == [], "offered again inside the snooze"
+    w.tick(41, []); w.tick(41 + md.END_GRACE_SECONDS, [])
+    w.tick(700, _uses("zoom"))
+    assert w.tick(710, _uses("zoom")), "never offered again after the snooze"
+
+
+def watch_unknown_waits_longer():
+    w = md.Watcher()
+    w.tick(0, _uses("odd"))
+    assert w.tick(md.HOLD_SECONDS[md.CALL] + 1, _uses("odd")) == [],         "an unknown app was offered as fast as a call app"
+    assert w.tick(md.HOLD_SECONDS[md.OTHER], _uses("odd"))
+
+
+def classify_never_offers_dictation():
+    assert md.classify(r"C:\W\Wispr Flow.exe") is None
+    assert md.classify(r"C:\m\meetily.exe") is None
+    assert md.classify("MSTeams_8wekyb3d8bbwe").key == "teams"
+    assert md.classify("Claude_pzs8sxrjxfjjc").kind == md.OTHER
+    assert md.parse_ignore(" Zoom, ,chrome ") == ["zoom", "chrome"]
+    assert md.parse_ignore(None) == []
+
+
+check("a call is offered once, after the hold", watch_offers_after_hold)
+check("a call ends only after the grace", watch_ends_after_grace)
+check("'Don't ask' and 'Not now' are honoured", watch_respects_no)
+check("an unknown app waits longer than a call app", watch_unknown_waits_longer)
+check("dictation and note takers are never offered", classify_never_offers_dictation)
+
+
+# =====================================================================
 section("6. Live round-trip (skipped if Ollama is absent)")
 
 

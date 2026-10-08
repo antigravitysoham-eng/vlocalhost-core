@@ -538,3 +538,20 @@ HOTKEY = "ctrl+shift+space"
 
 # Turn the hotkey off without clearing the chord you chose.
 HOTKEY_ENABLED = True
+
+# --- Noticing a call -----------------------------------------------------
+# When another app opens the microphone -- Zoom, Teams, a Meet tab -- offer to
+# take notes, in a small window that does not take focus from the call. Nothing
+# records until you click. See meeting_detect.py for how a call is noticed: a
+# local registry read of the same record the Windows privacy indicator uses, no
+# audio touched and nothing sent anywhere. Windows only in this release.
+MEETING_PROMPT = True
+
+# Apps never to offer for, comma-separated keys: "chrome, discord". Filled by
+# the offer's own "Don't ask for …" link, and emptied from Settings.
+MEETING_PROMPT_IGNORE = ""
+
+# When a call you are recording ends, save after a short countdown the offer
+# shows, with "Keep recording" to cancel. Off, the recording runs until you
+# stop it, exactly as before.
+MEETING_AUTO_STOP = True

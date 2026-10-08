@@ -900,6 +900,7 @@ body {
 .stage {
   position: relative; display: flex; flex-direction: column;
   background: var(--stage); color: var(--stage-ink);
+  box-shadow: inset 0 0 0 1px var(--stage-edge), var(--card-sh);
   border-radius: 16px; padding: 20px 22px;
   min-height: 300px;
 }
@@ -913,15 +914,15 @@ body {
 .stage-id { flex: 1; min-width: 0; }
 .stage .h { font: 600 17px/1.25 var(--f); color: var(--stage-ink); margin: 0; letter-spacing: -.01em; }
 .stage .meta { color: var(--stage-ink2); font: var(--t-data); margin-top: 4px; }
-.stage .pill { background: rgba(245,242,238,.08); color: var(--stage-ink2); box-shadow: none; }
+.stage .pill { background: var(--stage-tint); color: var(--stage-ink2); box-shadow: none; }
 .stage .pill b { background: currentColor; }
 
 .stage-toggle {
   flex: none; width: 26px; height: 26px; border: 0; border-radius: 8px; cursor: pointer;
-  background: rgba(245,242,238,.08); color: var(--stage-ink2); font-size: 12px; line-height: 1;
+  background: var(--stage-tint); color: var(--stage-ink2); font-size: 12px; line-height: 1;
 }
 .stage-toggle { font-family: var(--f); }
-.stage-toggle:hover { background: rgba(245,242,238,.14); }
+.stage-toggle:hover { background: var(--stage-tint-hi); }
 
 /* The meter, given the room the design gives it. */
 .stage-mid { flex: 1; display: flex; flex-direction: column; align-items: center;
@@ -959,6 +960,14 @@ body {
         font: 400 19px/1.45 var(--f); color: var(--stage-ink); }
 #screen-record[data-stage="full"] .said { font-size: 24px; }
 .said .prov { color: var(--stage-ink3); filter: blur(3.5px); }
+
+/* The sentences before the newest, smaller and quieter above it, so the stage
+   reads as a running transcript rather than one line replacing the last. */
+.said-prev { max-width: 760px; width: 100%; display: flex; flex-direction: column;
+             gap: 6px; text-align: center; margin-bottom: -22px; }
+.said-prev:empty { display: none; }
+.said-prev p { margin: 0; font: 400 15px/1.45 var(--f); color: var(--stage-ink2); }
+#screen-record[data-stage="full"] .said-prev p { font-size: 17px; }
 .said .prov:not(:empty) { margin-left: .3em; }
 
 .stage-foot { display: flex; align-items: center; gap: var(--s3); flex: none; }
@@ -969,7 +978,7 @@ body {
    rewrites it on every state change; the glyph is what is drawn. */
 .rec-dot {
   flex: none; width: 46px; height: 46px; padding: 0; border-radius: 50%;
-  font-size: 0; box-shadow: 0 0 0 3px rgba(245,242,238,.14);
+  font-size: 0; box-shadow: 0 0 0 3px var(--stage-tint-hi);
 }
 #screen-record[data-stage="full"] .rec-dot { width: 56px; height: 56px; }
 .rec-dot::before { font-size: 15px; line-height: 1; content: "●"; }
@@ -1088,6 +1097,9 @@ body {
 }
 .meta, .stage .meta { font: var(--t-body); color: var(--ink3);
                       text-transform: none; letter-spacing: 0; }
+/* On the stage, the stage's ink: --ink3 is the window's, and it was grey on
+   near-black whenever the window was light and the stage was not. */
+.stage .meta { color: var(--stage-ink2); }
 .screen > .meta { font: 400 14px/1.5 var(--f); color: var(--ink3);
                   text-transform: none; letter-spacing: 0; max-width: 62ch; }
 .chrome .t { font: 500 11px/1.3 var(--f); letter-spacing: .02em; text-transform: none; }
@@ -1105,7 +1117,7 @@ body {
  *    the whole button amber.                                               */
 #record.rec-dot {
   width: 46px; height: 46px; padding: 0; border-radius: 50%;
-  background: transparent; border: 2px solid rgba(255, 255, 255, .22);
+  background: transparent; border: 2px solid var(--stage-ring);
   display: grid; place-items: center; box-shadow: none; font-size: 0;
 }
 #screen-record[data-stage="full"] #record.rec-dot { width: 56px; height: 56px; }
