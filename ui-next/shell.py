@@ -240,6 +240,10 @@ def main(argv=None):
             prompt.start()
         except Exception as e:                      # noqa: BLE001
             print(f"[meeting] could not start: {e}", flush=True)
+        # Whatever fills records after each meeting runs while the window is
+        # open. Nothing registered (the free build) is a no-op.
+        import records_provider
+        records_provider.window_started(lambda p: api.push("records", p))
         if not start_now:
             return
         try:

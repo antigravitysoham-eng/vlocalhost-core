@@ -2604,7 +2604,7 @@ paintAppearance();
 (() => {
   const title = $('#chrome-title'), root = document.documentElement;
   const NAMES = { record: 'Recording', meeting: 'Meeting', library: 'Library',
-                  ask: 'Ask', assistants: 'Assistants', settings: 'Settings' };
+                  ask: 'Ask', records: 'Records', assistants: 'Assistants', settings: 'Settings' };
   const sync = () => {
     const open = [...document.querySelectorAll('section.screen')]
       .find(s => s.getBoundingClientRect().height > 0);
@@ -2620,4 +2620,442 @@ paintAppearance();
   document.addEventListener('click', () => setTimeout(sync, 60), true);
   setInterval(sync, 700);
   sync();
+})();
+
+
+/* ================================================================ records ==
+ *
+ * Records in the user's own format, when an extension supplies them through
+ * Core's records_provider. Core knows nothing about contracts: every request
+ * is passed to api().records(op, args) and drawn from what comes back. With
+ * no provider the nav item stays hidden and none of this runs.
+ *
+ * Three views in one screen: the formats (home), a new format (templates or
+ * the user's own sample), and one format (its fields, then its records).
+ */
+(() => {
+  const view = $('#rec-view'), err = $('#rec-err'), nav = $('#nav-records');
+  if (!view || !nav) return;
+  const R = { at: 'home', name: '', tab: 'fields', meetings: null, busy: false };
+
+  const call = async (op, args) => {
+    const r = await api().records(op, args || {});
+    if (!r || r.error) throw new Error((r && r.error) || 'No answer from this machine.');
+    return r;
+  };
+  const say = msg => { err.textContent = msg || ''; err.hidden = !msg; };
+  const btn = (label, cls, fn) => {
+    const b = el('button', 'btn' + (cls ? ' ' + cls : ''), label);
+    b.type = 'button';
+    b.onclick = async () => {
+      if (R.busy) return;
+      R.busy = true; b.disabled = true; say('');
+      try { await fn(b); } catch (e) { say(e.message); }
+      R.busy = false; b.disabled = false;
+    };
+    return b;
+  };
+  const pill = (text, kind) => el('span', 'pill rec-pill' + (kind ? ' ' + kind : ''), text);
+  const statusPill = c => c.status === 'approved' ? pill('Approved · v' + c.version, 'live')
+    : c.status === 'changed' ? pill('Changed — approve again', 'warm') : pill('Draft — not filling yet', 'warm');
+  const go = (at, name) => { R.at = at; if (name !== undefined) R.name = name; draw(); };
+  const when = iso => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return isNaN(d) ? iso : d.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  };
+  const backBtn = () => {
+    const b = el('button', 'disclose rec-back', '‹ All formats');
+    b.type = 'button';
+    b.onclick = () => go('home');
+    return b;
+  };
+
+  /* ---------------- home: the formats ---------------- */
+  async function home() {
+    const o = await call('overview');
+    $('#rec-follow').hidden = !o.following;
+    const box = el('div', 'rec-home');
+    if (!o.contracts.length) {
+      box.append(el('p', 'rec-note', 'No formats yet. Start from one a business like yours keeps, or bring your own.'));
+      box.append(await gallery());
+      return box;
+    }
+    const list = el('div', 'rec-cards');
+    for (const c of o.contracts) {
+      const card = el('button', 'rec-card');
+      card.type = 'button';
+      card.onclick = () => { R.tab = (c.held || c.status === 'approved') ? 'records' : 'fields'; go('one', c.name); };
+      const top = el('div', 'rec-card-top');
+      top.append(el('strong', null, c.name), statusPill(c));
+      card.append(top, el('div', 'rec-card-use', c.use_case || '—'));
+      const n = el('div', 'rec-card-n');
+      n.append(el('span', null, `${c.delivered} sent`));
+      if (c.held) n.append(el('span', 'rec-wait', `${c.held} waiting for you`));
+      n.append(el('span', null, `${c.fields} fields · ${c.target.toUpperCase()}`));
+      card.append(n);
+      list.append(card);
+    }
+    const act = el('div', 'actions');
+    act.append(btn('New format', 'primary', () => go('new')));
+    box.append(list, act);
+    return box;
+  }
+
+  /* ---------------- new: templates or their own sample ---------------- */
+  async function gallery() {
+    const t = await call('templates');
+    const wrap = el('div', 'rec-new');
+    wrap.append(el('div', 'panel-k', 'Start from a record businesses keep'));
+    const grid = el('div', 'rec-gallery');
+    for (const x of t.templates) {
+      const card = el('div', 'rec-tpl');
+      card.append(el('strong', null, x.title), el('div', 'rec-tpl-who', x.who),
+                  el('p', null, x.why), el('div', 'rec-tpl-f', x.fields.join(' · ')));
+      card.append(btn('Use this', '', async () => {
+        const r = await call('create', { template: x.id, name: x.title });
+        R.tab = 'fields';
+        go('one', r.contract.name);
+      }));
+      grid.append(card);
+    }
+    wrap.append(grid);
+
+    const own = el('div', 'panel rec-own');
+    own.append(el('div', 'panel-k', 'Or bring your own'),
+               el('p', 'rec-note', 'Paste the header row of your sheet, one record from your system, or a list of field names. '
+                 + 'The local model suggests what to listen for; you check it before anything is filled.'));
+    const name = el('input', 'input'); name.placeholder = 'Name, e.g. showroom-enquiries';
+    const use = el('input', 'input'); use.placeholder = 'What these conversations are, e.g. a customer asking about a car';
+    const kind = el('select', 'input');
+    [['csv', 'CSV header row'], ['json', 'JSON record'], ['txt', 'List of field names']].forEach(([v, l]) => {
+      const o = el('option', null, l); o.value = v; kind.append(o);
+    });
+    const sample = el('textarea', 'input rec-sample');
+    sample.placeholder = 'Customer Name,Mobile,Model,Budget,Test drive date';
+    name.setAttribute('aria-label', 'Name'); use.setAttribute('aria-label', 'What these conversations are');
+    kind.setAttribute('aria-label', 'Sample type'); sample.setAttribute('aria-label', 'Sample');
+    own.append(name, use, kind, sample);
+    const act = el('div', 'actions');
+    act.append(btn('Read my sample', 'primary', async b => {
+      b.textContent = 'Reading… the local model is suggesting hints';
+      try {
+        const r = await call('create', { name: name.value, use_case: use.value, kind: kind.value, sample: sample.value });
+        R.tab = 'fields';
+        go('one', r.contract.name);
+      } finally { b.textContent = 'Read my sample'; }
+    }));
+    own.append(act);
+    wrap.append(own);
+    return wrap;
+  }
+
+  /* ---------------- one format ---------------- */
+  async function one() {
+    const { contract: c } = await call('contract', { name: R.name });
+    const box = el('div', 'rec-one');
+    const head = el('div', 'rec-head');
+    const title = el('div', 'rec-title');
+    title.append(el('strong', null, c.name), statusPill(c));
+    head.append(backBtn(), title);
+    if (c.use_case) head.append(el('div', 'rec-card-use', c.use_case));
+    const tabs = el('div', 'rec-tabs');
+    tabs.setAttribute('role', 'tablist');
+    [['fields', 'Fields'], ['records', `Records${c.held ? ' · ' + c.held + ' waiting' : ''}`]].forEach(([k, l]) => {
+      const t = el('button', 'chip', l);
+      t.type = 'button'; t.setAttribute('role', 'tab');
+      t.setAttribute('aria-selected', String(R.tab === k));
+      t.onclick = () => { R.tab = k; draw(); };
+      tabs.append(t);
+    });
+    box.append(head, tabs);
+    box.append(R.tab === 'records' ? await records(c) : await fields(c));
+    return box;
+  }
+
+  const TYPES = ['text', 'number', 'integer', 'boolean', 'date', 'phone', 'enum'];
+  const TYPE_LABEL = { text: 'Text', number: 'Number', integer: 'Whole number', boolean: 'Yes / no',
+                       date: 'Date', phone: 'Phone', enum: 'Choice' };
+
+  async function fields(c) {
+    const wrap = el('div', 'rec-fields');
+    const rows = c.fields.map(f => Object.assign({}, f));
+    const table = el('div', 'rec-table');
+    table.setAttribute('role', 'table');
+    const hdr = el('div', 'rec-row rec-row-h');
+    hdr.setAttribute('role', 'row');
+    ['Field', 'Listen for', 'Type', 'Required', 'Personal'].forEach(h => {
+      const x = el('div', null, h); x.setAttribute('role', 'columnheader'); hdr.append(x);
+    });
+    table.append(hdr);
+    rows.forEach(f => {
+      const r = el('div', 'rec-row');
+      r.setAttribute('role', 'row');
+      const nm = el('div', 'rec-fname', f.name);
+      if (f.system || f.value != null) {
+        r.append(nm, el('div', 'rec-auto', f.system ? 'Filled automatically: ' + f.system.replace('_', ' ')
+                                                    : 'Always: ' + f.value), el('div'), el('div'), el('div'));
+        table.append(r);
+        return;
+      }
+      const hint = el('input', 'input');
+      hint.value = f.hint || '';
+      hint.setAttribute('aria-label', 'Listen for, ' + f.name);
+      hint.oninput = () => { f.hint = hint.value; };
+      const cell = el('div');
+      cell.append(hint);
+      const type = el('select', 'input');
+      type.setAttribute('aria-label', 'Type, ' + f.name);
+      TYPES.forEach(t => {
+        const o = el('option', null, TYPE_LABEL[t]); o.value = t;
+        if (t === f.type) o.selected = true;
+        type.append(o);
+      });
+      const opts = el('input', 'input rec-opts');
+      opts.placeholder = 'Choices, comma separated';
+      opts.setAttribute('aria-label', 'Choices, ' + f.name);
+      opts.value = (f.options || []).join(', ');
+      opts.hidden = f.type !== 'enum';
+      opts.oninput = () => { f.options = opts.value; };
+      type.onchange = () => { f.type = type.value; opts.hidden = f.type !== 'enum'; };
+      cell.append(opts);
+      const tcell = el('div');
+      tcell.append(type);
+      const tick = key => {
+        const d = el('div', 'rec-check');
+        const i = el('input'); i.type = 'checkbox'; i.checked = !!f[key];
+        i.setAttribute('aria-label', key + ', ' + f.name);
+        i.onchange = () => { f[key] = i.checked; };
+        d.append(i);
+        return d;
+      };
+      r.append(nm, cell, tcell, tick('required'), tick('personal'));
+      table.append(r);
+    });
+    wrap.append(table);
+
+    /* Where records go, and whether a person checks each one first. */
+    const dl = el('div', 'panel rec-deliver');
+    dl.append(el('div', 'panel-k', 'Where each record goes'));
+    const folder = el('input', 'input');
+    folder.value = (c.deliver && c.deliver.folder) || '';
+    folder.setAttribute('aria-label', 'Folder');
+    const pick = btn('Choose…', '', async () => {
+      const r = await api().choose_folder();
+      if (r && r.path) folder.value = r.path;
+    });
+    const frow = el('div', 'rec-inline');
+    frow.append(folder, pick);
+    const file = el('input', 'input');
+    file.value = (c.deliver && c.deliver.file) || '';
+    file.hidden = c.target !== 'csv';
+    file.setAttribute('aria-label', 'File name');
+    const option = (label, on) => {
+      const l = el('label', 'rec-tick');
+      const i = el('input'); i.type = 'checkbox'; i.checked = !!on;
+      l.append(i, document.createTextNode(' ' + label));
+      return [l, i];
+    };
+    const [apiL, apiI] = option('Also let your own software read them from the local API', c.deliver && c.deliver.api);
+    const [revL, revI] = option('Hold every record until a person has checked it', c.review);
+    dl.append(el('div', 'rec-lab', c.target === 'csv' ? 'Folder and sheet (rows are appended)' : 'Folder (one JSON file per record)'),
+              frow, file, apiL, revL);
+    wrap.append(dl);
+
+    const save = async () => {
+      const r = await call('save', { name: c.name, fields: rows, review: revI.checked,
+        deliver: { folder: folder.value, file: file.value, api: apiI.checked } });
+      return r.contract;
+    };
+
+    /* Try it on a meeting already recorded: nothing is sent. */
+    const tryBox = el('div', 'panel rec-try');
+    tryBox.append(el('div', 'panel-k', 'Try it on a meeting you already recorded'));
+    const pickM = el('select', 'input');
+    pickM.setAttribute('aria-label', 'Meeting');
+    if (!R.meetings) {
+      try { R.meetings = (await api().library(60)).filter(m => m.transcript); } catch (e) { R.meetings = []; }
+    }
+    if (!R.meetings.length) pickM.append(el('option', null, 'No recorded meetings yet'));
+    R.meetings.forEach(m => { const o = el('option', null, m.title); o.value = m.base; pickM.append(o); });
+    const out = el('div', 'rec-try-out');
+    const tact = el('div', 'actions');
+    tact.append(btn('Fill it, without sending', '', async b => {
+      if (!R.meetings.length) return;
+      await save();
+      b.textContent = 'Filling… about a minute on a laptop CPU';
+      try {
+        const r = await call('try', { name: c.name, base: pickM.value });
+        out.replaceChildren(recordCard(r.record, null));
+      } finally { b.textContent = 'Fill it, without sending'; }
+    }));
+    tryBox.append(pickM, tact, out);
+    wrap.append(tryBox);
+
+    /* Approve: the line between a draft and records going out. */
+    const ap = el('div', 'panel rec-approve');
+    ap.append(el('div', 'panel-k', c.status === 'approved'
+      ? `Approved by ${c.approved_by} · ${when(c.approved_at)}` : 'Approve'));
+    ap.append(el('p', 'rec-note', 'Approving locks these fields as a version. From then on every meeting fills it automatically'
+      + (c.personal && c.personal.length ? `. It carries personal data: ${c.personal.join(', ')}.` : '.')));
+    const by = el('input', 'input');
+    by.placeholder = 'Your name or email';
+    by.setAttribute('aria-label', 'Approved by');
+    by.value = c.approved_by || '';
+    const aact = el('div', 'actions');
+    aact.append(btn('Save changes', '', async () => { await save(); R.busy = false; draw(); }),
+                btn(c.status === 'approved' ? 'Approve a new version' : 'Approve and start filling', 'primary', async () => {
+                  await save();
+                  await call('approve', { name: c.name, by: by.value });
+                  R.tab = 'records'; R.busy = false; draw();
+                }));
+    const retire = el('button', 'disclose rec-retire', 'Retire this format');
+    retire.type = 'button';
+    retire.onclick = () => {
+      retire.replaceWith(btn('Yes, stop filling it (its file is kept)', '', async () => {
+        await call('remove', { name: c.name });
+        R.busy = false; go('home');
+      }));
+    };
+    ap.append(by, aact, retire);
+    wrap.append(ap);
+    return wrap;
+  }
+
+  /* One record: each value, and where it was said. Held records are editable. */
+  function recordCard(r, c) {
+    const card = el('div', 'rec-rec' + (c ? ' held' : ''));
+    const top = el('div', 'rec-rec-top');
+    top.append(el('span', 'meta', when(r.captured_at)), el('span', 'rec-src', r.source || ''));
+    if (r.status === 'not_applicable') {
+      top.append(pill('Not this kind of conversation — nothing would be sent', 'warm'));
+      if (r.looked_like) card.append(el('div', 'rec-why', 'It looked like: ' + r.looked_like));
+    }
+    card.append(top);
+    if (c && r.held_reason) card.append(el('div', 'rec-why', r.held_reason));
+    const grid = el('div', 'rec-vals');
+    const fixes = {};
+    Object.entries(r.values || {}).forEach(([k, v]) => {
+      const row = el('div', 'rec-val');
+      row.append(el('div', 'rec-k', k));
+      const cell = el('div');
+      if (c) {
+        const f = (c.fieldsByName || {})[k];
+        let inp;
+        if (f && f.type === 'enum') {
+          inp = el('select', 'input');
+          ['', ...(f.options || [])].forEach(o => {
+            const op = el('option', null, o || '—'); op.value = o;
+            if (o === v) op.selected = true;
+            inp.append(op);
+          });
+        } else { inp = el('input', 'input'); inp.value = v || ''; }
+        inp.setAttribute('aria-label', k);
+        if ((r.missing || []).includes(k)) inp.classList.add('rec-missing');
+        inp.onchange = () => { fixes[k] = inp.value; };
+        cell.append(inp);
+      } else {
+        cell.append(el('div', 'rec-v' + (v ? '' : ' rec-none'), v || '—'));
+        if ((r.fixed_by_person || []).includes(k) && r.model_values && k in r.model_values) {
+          cell.append(el('div', 'rec-was', 'Edited · the model wrote: ' + (r.model_values[k] || '—')));
+        }
+      }
+      const cite = (r.citations || {})[k];
+      if (cite && cite.said) cell.append(el('div', 'rec-cite', (cite.at ? '[' + cite.at + '] ' : '') + '“' + cite.said + '”'));
+      else if ((r.problems || {})[k]) cell.append(el('div', 'rec-cite rec-prob', r.problems[k]));
+      row.append(cell);
+      grid.append(row);
+    });
+    if (r.status !== 'not_applicable') card.append(grid);   // nothing was filled; empty rows are noise
+    if (c) {
+      const act = el('div', 'actions');
+      act.append(btn('Send', 'primary', async () => {
+        const res = await call('release', { name: c.name, record_id: r.record_id, fixes });
+        if (!res.result.delivered) throw new Error('Still held: ' + (res.result.reason || 'a required field is empty'));
+        R.busy = false; draw();
+      }));
+      card.append(act);
+    }
+    return card;
+  }
+
+  async function records(c) {
+    const [{ contract: full }, r] = await Promise.all([call('contract', { name: c.name }), call('records', { name: c.name })]);
+    full.fieldsByName = {};
+    full.fields.forEach(f => (full.fieldsByName[f.name] = f));
+    const wrap = el('div', 'rec-records');
+    if (c.status !== 'approved') {
+      wrap.append(el('p', 'rec-note', 'Not filling yet: approve the fields first. Meetings recorded before that are not filled.'));
+    }
+    if (r.held.length) {
+      wrap.append(el('div', 'panel-k', `Waiting for you · ${r.held.length}`));
+      r.held.forEach(h => wrap.append(recordCard(h, full)));
+    }
+    wrap.append(el('div', 'panel-k rec-sent-k', `Sent · ${r.delivered.length}`));
+    if (!r.delivered.length) {
+      wrap.append(el('p', 'rec-note', 'Nothing sent yet. Record a meeting with this window open, and its record appears here.'));
+    }
+    r.delivered.forEach(d => wrap.append(recordCard(d, null)));
+
+    /* Conversations the model judged to be something else. Shown, because a
+       small model is sometimes wrong about that, and one click undoes it. */
+    if ((r.skipped || []).length) {
+      wrap.append(el('div', 'panel-k rec-sent-k', `Skipped as a different kind of conversation · ${r.skipped.length}`));
+      const list = el('div', 'rec-skips');
+      r.skipped.forEach(sk => {
+        const row = el('div', 'rec-skip');
+        const txt = el('div');
+        txt.append(el('div', 'rec-src', sk.source + (sk.captured_at ? ' · ' + when(sk.captured_at) : '')),
+                   el('div', 'rec-card-use', sk.looked_like ? 'Looked like: ' + sk.looked_like : 'Did not match this format'));
+        row.append(txt, btn('Fill it anyway', '', async b => {
+          b.textContent = 'Filling…';
+          const base = (sk.source || '').replace(/-transcript\.txt$/, '');
+          const res = await call('anyway', { name: c.name, base, record_id: sk.record_id });
+          if (!res.result.delivered && !res.result.held) throw new Error(res.result.reason || 'Not filled.');
+          R.busy = false; draw();
+        }));
+        list.append(row);
+      });
+      wrap.append(list);
+    }
+    if (c.deliver && c.deliver.folder) {
+      wrap.append(el('div', 'rec-note', 'Delivered to ' + c.deliver.folder + (c.deliver.file ? ' · ' + c.deliver.file : '')));
+    }
+    return wrap;
+  }
+
+  /* ---------------- drawing ---------------- */
+  async function draw() {
+    let node;
+    try {
+      node = R.at === 'new' ? await gallery() : R.at === 'one' ? await one() : await home();
+      if (R.at === 'new') node.prepend(backBtn());
+    } catch (e) {
+      say(e.message);
+      if (R.at !== 'home') { R.at = 'home'; return draw(); }
+      return;
+    }
+    view.replaceChildren(node);
+  }
+
+  /* A new record after a meeting: redraw if the screen is open, so the user
+     sees it arrive rather than finding it later. */
+  window.addEventListener('vl', e => {
+    if (e.detail && e.detail.type === 'records' && !$('#screen-records').hidden && !R.busy) draw();
+  });
+
+  let shown = false;
+  const probe = async () => {
+    if (shown || !api() || !api().records) return;
+    try {
+      const o = await api().records('overview', {});
+      if (o && o.available) {
+        shown = true;
+        nav.hidden = false;
+        nav.addEventListener('click', () => { say(''); draw(); });
+      }
+    } catch (e) { /* stays hidden */ }
+  };
+  window.addEventListener('pywebviewready', probe);
+  setTimeout(probe, 1500);
 })();

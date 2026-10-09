@@ -81,6 +81,10 @@
       <button data-screen="library"><span class="dot"></span>Library</button>
       <div class="g">Intelligence</div>
       <button data-screen="ask"><span class="dot"></span>Ask</button>
+      <!-- Only when an extension supplies records (records_provider). The free
+           build never shows it: a screen that can only say "not available" is
+           an advert, not a feature. -->
+      <button data-screen="records" id="nav-records" hidden><span class="dot"></span>Records</button>
       <div class="g">Machine</div>
       <button data-screen="assistants"><span class="dot"></span>Assistants</button>
       <button data-screen="settings"><span class="dot"></span>Settings</button>
@@ -337,6 +341,15 @@
            connect one, what will it be able to see, and what has it looked at.
            The third is the one no config-file integration ever answers, which
            is why it gets equal room rather than a line in Settings. -->
+      <section class="screen" id="screen-records" hidden>
+        <h1 class="h">Every conversation, in your format.</h1>
+        <div class="lede rec-lede">Pick the record your business keeps after a conversation, check it
+          once, and every meeting after fills it. Each value points at the line it came from.</div>
+        <div class="rec-follow" id="rec-follow" hidden><b></b>Filling after every meeting while this window is open</div>
+        <div class="rec-err" id="rec-err" role="alert" hidden></div>
+        <div id="rec-view" aria-live="polite"></div>
+      </section>
+
       <section class="screen" id="screen-assistants" hidden>
         <h1 class="h">Assistants</h1>
         <div class="meta">What a connected assistant may read from this machine</div>

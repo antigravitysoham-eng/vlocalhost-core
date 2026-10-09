@@ -877,6 +877,45 @@ check("each engine resolves its own model", each_engine_resolves_its_own_model)
 check("runaway repetition never ships", runaway_repetition_never_ships)
 check("notes never invent decisions", notes_never_invent_decisions)
 check("ask screen follows the provider", ask_screen_follows_the_provider)
+
+
+def records_screen_only_with_a_provider():
+    """The Records screen exists only when an extension supplies records: the
+    free build answers "not available" and the page never shows the nav item.
+    Requests outside the declared set never reach a provider."""
+    import records_provider
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui-next"))
+    import api as bridge
+
+    saved = records_provider.get()
+    try:
+        records_provider._PROVIDER = None
+        b = bridge.Api()
+        assert b.records("overview") == {"available": False}
+        records_provider.window_started(lambda p: None)       # no-op, no error
+        seen = []
+
+        class Fake:
+            def call(self, op, args):
+                seen.append(op)
+                return {"contracts": []}
+        records_provider.register(Fake())
+        assert b.records("overview")["available"] is True
+        assert "error" in b.records("delete_everything")
+        assert "error" in b.records("try", {"base": "../../etc/passwd"})
+        assert seen == ["overview"], seen
+        try:
+            records_provider.register(object())
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("a provider without call() was accepted")
+    finally:
+        records_provider._PROVIDER = saved
+    return "hidden in the free build; unknown requests and paths refused"
+
+
+check("records screen only with a provider", records_screen_only_with_a_provider)
 check("settings writes are attributed", settings_writes_are_attributed)
 check("notes model resolution order", notes_model_resolution_order)
 check("bundled model dir is relocatable", bundled_dir_is_relocatable)

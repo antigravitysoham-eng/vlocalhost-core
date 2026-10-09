@@ -667,6 +667,36 @@ class Api:
         except Exception as e:  # noqa: BLE001
             return {"available": True, "error": str(e)}
 
+    # -- records in the user's own format ---------------------------------------
+    # Answered by whatever provider is registered in records_provider, if any.
+    # The free build has none and the page never shows the screen.
+
+    def records(self, op="", args=None):
+        import records_provider
+
+        p = records_provider.get()
+        if p is None:
+            return {"available": False}
+        op = str(op or "")
+        if op not in records_provider.OPS:
+            return {"available": True, "error": f"Unknown request {op!r}."}
+        args = dict(args or {}) if isinstance(args, dict) else {}
+        if op in ("try", "anyway"):
+            # The notes folder is Core's: read the transcript here and hand the
+            # provider text, so it never needs to know the naming convention.
+            base = os.path.basename(str(args.get("base") or ""))
+            path = os.path.join(engine_mod.notes_dir(), base + "-transcript.txt")
+            if not base or not os.path.isfile(path):
+                return {"available": True, "error": "That meeting has no transcript."}
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                args = {"name": args.get("name"), "text": fh.read(),
+                        "source": os.path.basename(path),
+                        "record_id": args.get("record_id")}
+        try:
+            return dict(p.call(op, args) or {}, available=True)
+        except Exception as e:  # noqa: BLE001 - the screen says why, never crashes
+            return {"available": True, "error": str(e)}
+
     def shutdown(self):
         """Finish what is being written, then let the window go.
 
