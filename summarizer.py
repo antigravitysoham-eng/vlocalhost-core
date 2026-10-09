@@ -88,10 +88,10 @@ A short paragraph (3-5 sentences) capturing what the meeting was about.
 - Bullet points of the main topics discussed.
 
 ## Decisions
-- What the group settled on. Decisions in real meetings are short and plain --
-"then let's ship on Friday", "park it until the installer lands", "we'll go
-with the second option". They are rarely announced as decisions, so look for
-the sentence that ends an argument rather than a heading.
+- What the group settled on. Decisions in real meetings are short and plain,
+and rarely announced as decisions, so look for the sentence that ends an
+argument rather than a heading. Write only decisions this transcript contains,
+in its own words; never write a decision as an example of what one looks like.
 
 Something can be a discussion point and a decision at once; put it here too if
 it is one. Do not leave this section empty just because the point appears
@@ -107,11 +107,10 @@ were not said. The three descriptions above are labels for the parts, not an
 answer: never write "what was agreed", "Task", "owner" or "due date" into the
 notes, and never invent a name or a day to fill a gap.
 
-Anything anyone committed to doing counts. A commitment is usually first
-person and plain -- "I will have it done by Thursday", "I'll own that one",
-"leave it with me" -- and a question like "can you own X?" answered "yes" is a
-commitment by whoever answered. The owner is the person who said it. A day
-named out loud ("Thursday", "end of the week") is the due date.
+Anything anyone committed to doing counts. A commitment is usually a plain
+first-person promise to do something, or a "yes" in answer to being asked to
+take something on -- in which case it belongs to whoever said yes. The owner is
+the person who said it. A day named out loud is the due date.
 
 A decision says what will happen; an action item says who is doing it and by
 when. The same piece of work can appear in both. Do not leave this section
@@ -969,6 +968,118 @@ def collapse_repeats(text: str, limit: int = 1) -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
+#: Phrases this file's own prompts used to quote as examples. A small model
+#: copied them into real notes as decisions and commitments for meetings that
+#: never said them -- "then let's ship on Friday" turned up under DECIDED for a
+#: phone-shop voice memo. The prompts no longer quote them; this list removes
+#: any that still appear, unless the meeting really said them.
+_LEAKED_EXAMPLES = (
+    "then let's ship on friday", "ship on friday", "park it until the installer lands",
+    "until the installer lands", "we'll go with the second option", "go with the second option",
+    "can you own x", "can you own this", "i'll own that one", "leave it with me",
+    "i will have it done by thursday", "i'll take that one",
+)
+
+#: Words a model adds when it paraphrases a decision or a commitment. They say
+#: nothing about what was decided, so they never count for or against a line.
+_FRAME_WORDS = frozenset("""
+a an and are as at be been but by can could did do does done for from had has
+have he her his i if in into is it its just let lets let's me more must my no
+not of on one or our out over she should so some than that the their them then
+there these they this those to too up us was we we'll were what when which who
+will with would you your i'll i'm it's that's there's agreed agree decided
+decision decisions discussed discussion group team meeting made make makes
+need needs going plan planned regarding about also was were item items action
+actions point points key commitment commitments committed someone everyone
+""".split())
+
+_SECTIONS_TO_GROUND = ("decisions", "action items")
+
+
+def _stem(word: str) -> str:
+    w = word.lower().strip("'")
+    w = re.sub(r"^(\d+)(st|nd|rd|th)$", r"\1", w)
+    for suffix in ("ing", "ed", "es", "s", "ly"):
+        if len(w) > len(suffix) + 2 and w.endswith(suffix):
+            return w[: -len(suffix)]
+    return w
+
+
+def _words(text: str):
+    # "256GB" and "256 GB" are the same thing said two ways.
+    text = re.sub(r"(\d)([a-zA-Z])", r"\1 \2", text or "")
+    return [w for w in re.findall(r"[A-Za-z0-9']+", text) if w.strip("'")]
+
+
+def _mostly_latin(transcript: str) -> bool:
+    letters = re.findall(r"[^\W\d_]", transcript or "")
+    if not letters:
+        return False
+    return sum(c.isascii() for c in letters) / len(letters) >= 0.85
+
+
+def ground_facts(notes: str, transcript: str, keep_ratio: float = 0.6) -> str:
+    """Drop decisions and action items the meeting never said.
+
+    A guarantee rather than a request: the prompt asks the model to use only
+    what is in the transcript, and a 1B-3B local model still writes decisions
+    from nowhere. So every bullet under Decisions and Action Items must have
+    most of its content words somewhere in the transcript, or it is removed.
+    VIBE records are held to the same rule (``vlocalhost_pro.contracts.fill``).
+
+    Only for transcripts that are mostly in Latin script. Notes can be written
+    in a different language from the meeting -- a Hindi call summarised in
+    English -- and matching English words against Devanagari would delete real
+    decisions. Those meetings still lose the known leaked prompt examples.
+    """
+    if not notes or not transcript:
+        return notes
+    spoken = strip_timestamps(transcript).lower()
+    vocab = {_stem(w) for w in _words(spoken)}
+    match_words = _mostly_latin(spoken)
+
+    out, section, kept_in_section, dropped_in_section = [], "", 0, 0
+
+    def close_section():
+        # A section the guard emptied says so, rather than vanishing.
+        if section in _SECTIONS_TO_GROUND and dropped_in_section and not kept_in_section:
+            at = len(out)
+            while at and not out[at - 1].strip():
+                at -= 1                      # before the blank lines that end the section
+            out.insert(at, "- None recorded.")
+
+    for raw in notes.splitlines():
+        line = raw.strip()
+        if line.startswith("#"):
+            close_section()
+            section = line.lstrip("#").strip().lower()
+            kept_in_section = dropped_in_section = 0
+            out.append(raw)
+            continue
+        if section not in _SECTIONS_TO_GROUND or not line.startswith(("-", "*", "+")):
+            out.append(raw)
+            continue
+        body = re.sub(r"^[-*+]\s*(\[[ xX]?\]\s*)?", "", line)
+        low = body.lower().replace("’", "'")
+        if low.startswith("none recorded"):
+            out.append(raw)
+            continue
+        leaked = any(p in low and p not in spoken for p in _LEAKED_EXAMPLES)
+        ungrounded = False
+        if match_words and not leaked:
+            content = [_stem(w) for w in _words(low) if w.lower() not in _FRAME_WORDS]
+            content = [w for w in content if len(w) > 1]
+            if content:
+                ungrounded = sum(w in vocab for w in content) / len(content) < keep_ratio
+        if leaked or ungrounded:
+            dropped_in_section += 1
+            continue
+        kept_in_section += 1
+        out.append(raw)
+    close_section()
+    return "\n".join(out) + ("\n" if notes.endswith("\n") else "")
+
+
 def summarize(transcript: str, on_progress=None) -> str:
     """Return Markdown notes, or raise RuntimeError if the engine is unreachable.
 
@@ -1017,8 +1128,10 @@ def summarize(transcript: str, on_progress=None) -> str:
         long_way = False
 
     if not long_way:
-        return collapse_repeats(scrub_timestamps(eng.summarize(transcript)))
-
-    return collapse_repeats(scrub_timestamps(rolling.summarize(
-        eng, transcript, _language_directive(), on_progress,
-        system=persona())))
+        notes = eng.summarize(transcript)
+    else:
+        notes = rolling.summarize(eng, transcript, _language_directive(), on_progress,
+                                  system=persona())
+    # Every path to saved notes ends here, so this is where a decision nobody
+    # made is stopped: whatever the engine, and however long the meeting.
+    return collapse_repeats(scrub_timestamps(ground_facts(notes, transcript)))

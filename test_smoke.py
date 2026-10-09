@@ -553,6 +553,50 @@ def runaway_repetition_never_ships():
     return "loops dropped, real notes untouched"
 
 
+def notes_never_invent_decisions():
+    """A decision or commitment in the notes must be something the meeting said.
+
+    Found on 9 Oct 2026 testing the shipped build: notes for a phone-shop voice
+    memo listed DECIDED "Then let's ship on Friday", and a lawyer's client call
+    got "park it until the installer lands" and "can you own X?". All three were
+    example sentences from this repository's own prompt, copied by a small
+    local model into meetings that never said them.
+    """
+    memo = ("[00:00:02] Speaker: A customer wanted the 256GB phone in blue.\n"
+            "[00:00:09] Speaker: She will come back on Saturday. Call her as soon as the blue one arrives.\n"
+            "[00:00:14] Speaker: And we are out of fast chargers.")
+    notes = ("## Summary\nA customer asked for a phone.\n\n"
+             "## Decisions\n- Then let's ship on Friday\n- Park the charger order until the installer lands\n\n"
+             "## Action Items\n- [ ] Call the customer as soon as the blue phone arrives\n")
+    out = summarizer.ground_facts(notes, memo)
+    assert "ship on Friday" not in out, "a prompt example survived as a decision"
+    assert "installer lands" not in out, "an ungrounded decision survived"
+    assert "Call the customer as soon as the blue phone arrives" in out, "a real action item was dropped"
+    lines = out.splitlines()
+    i = lines.index("## Decisions")
+    assert lines[i + 1] == "- None recorded.", f"emptied section not marked: {lines[i:i + 3]}"
+    assert "## Summary" in out and "A customer asked for a phone." in out, "summary touched"
+
+    # Said out loud, the same words are a real decision and stay.
+    said = "[00:00:01] You: OK, then let's ship on Friday."
+    kept = summarizer.ground_facts("## Decisions\n- Then let's ship on Friday\n", said)
+    assert "ship on Friday" in kept, "a decision that was really said was dropped"
+
+    # Notes written in English for a meeting in another script: words cannot be
+    # matched, so only the known leaked examples go.
+    hindi = ("[00:00:01] You (hi): हम अगले बुधवार "
+             "तक रिलीज़ करेंगे")
+    trans = summarizer.ground_facts("## Decisions\n- Release next Wednesday\n- Then let's ship on Friday\n", hindi)
+    assert "Release next Wednesday" in trans, "a translated decision was dropped"
+    assert "ship on Friday" not in trans, "a leaked example survived a translated meeting"
+
+    # And the prompts no longer quote examples a model can copy.
+    prompt = summarizer._notes_prompt("x")
+    for phrase in ("ship on Friday", "installer lands", "second option", "can you own"):
+        assert phrase not in prompt, f"the notes prompt still quotes {phrase!r}"
+    return "invented decisions dropped; real and translated ones kept"
+
+
 def settings_writes_are_attributed():
     """A setting that moves must leave a record of which code moved it."""
     import diagnostics
@@ -768,6 +812,7 @@ check("notes prompt has no copyable placeholder", prompt_has_no_copyable_placeho
 check("generation floor applies to notes only", notes_floor_applies_only_to_notes)
 check("each engine resolves its own model", each_engine_resolves_its_own_model)
 check("runaway repetition never ships", runaway_repetition_never_ships)
+check("notes never invent decisions", notes_never_invent_decisions)
 check("settings writes are attributed", settings_writes_are_attributed)
 check("notes model resolution order", notes_model_resolution_order)
 check("bundled model dir is relocatable", bundled_dir_is_relocatable)
@@ -865,7 +910,7 @@ class _FakeEngine:
     def count_tokens(self, text):
         return len(text.split())          # one token per word, exactly
 
-    def _complete(self, prompt, max_tokens, min_tokens=0):
+    def _complete(self, prompt, max_tokens, min_tokens=0, system=None):
         self.calls.append(prompt)
         if "WHAT HAPPENED:" in prompt:    # the one paragraph the model writes
             return "The team met and agreed some things."

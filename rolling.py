@@ -137,8 +137,8 @@ transcript actually says:
 Rules:
 - The four headings are labels. Never write them as items.
 - ACTIONS is for something a person committed to doing. Start the line with who \
-said it, then what, then any day they named. "I'll take that one" is a \
-commitment; so is "yes" answering "can you own this?".
+said it, then what, then any day they named. A plain first-person promise is \
+a commitment, and so is "yes" in answer to being asked to take something on.
 - DECISIONS is what the group settled on. It is rarely announced as a decision \
 -- look for the sentence that ends an argument.
 - Use the words that were actually said. Do not summarise them into a category.
