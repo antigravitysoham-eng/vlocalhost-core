@@ -597,6 +597,29 @@ def notes_never_invent_decisions():
     return "invented decisions dropped; real and translated ones kept"
 
 
+def speaker_echo_and_noise_phrases_dropped():
+    """9 Oct test: on speakers the mic re-heard the call as "You", and tiny
+    turned room noise into "Thanks for watching." / "One, two, three."."""
+    import transcriber as t
+    for junk in ("Thanks for watching.", "thank you for watching!!", "One, two, three.", "You"):
+        assert t.is_noise_phrase(junk), junk
+    assert not t.is_noise_phrase("Thanks for watching the demo with us today")
+    heard = "Can we close it by the 15th of October? I will send the quote."
+    assert t.is_echo("by the 15th of October", heard)
+    assert not t.is_echo("Yes", heard), "a short reply is the user, keep it"
+    assert not t.is_echo("I can do the 20th instead, not earlier", heard)
+
+    import notetaker
+    nt = notetaker.NoteTaker.__new__(notetaker.NoteTaker)
+    assert not nt._echo(heard, config.LABEL_THEM)
+    assert nt._echo("by the 15th of October", config.LABEL_ME)
+    assert not nt._echo("by the 15th of October", ""), "mic-only capture has nothing to compare"
+    return "echo lines and noise phrases dropped; real replies kept"
+
+
+check("speaker echo and noise phrases are dropped", speaker_echo_and_noise_phrases_dropped)
+
+
 def ask_screen_follows_the_provider():
     """The Ask screen works only when a provider is registered, and says so otherwise.
 

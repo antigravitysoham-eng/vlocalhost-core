@@ -12,6 +12,8 @@ Any engine only needs two methods:
 
 import importlib
 
+import re
+
 import numpy as np
 
 import config
@@ -25,6 +27,43 @@ _HALLUCINATIONS = {
     "ご視聴ありがとうございました", "字幕by索兰娅", "請不吝點贊 訂閱",
     "धन्यवाद", "gracias.", "merci.",
 }
+# The same, compared with case and punctuation stripped, so "Thanks for
+# watching." and "thanks for watching!!" are one entry. These are the phrases
+# small models produce from room noise -- seen in the 9 Oct test with tiny --
+# and only ever dropped when they are the *whole* utterance.
+_HALLUCINATION_WORDS = {
+    "you", "thank you", "thanks for watching", "thank you for watching",
+    "thank you so much for watching", "thanks for watching and see you next time",
+    "please subscribe", "like and subscribe", "subscribe to the channel",
+    "see you next time", "see you in the next video", "one two three", "bye",
+}
+
+
+def _words(text):
+    """Lower-case words only: what two transcriptions of one sound share."""
+    return re.findall(r"\w+", (text or "").lower())
+
+
+def is_noise_phrase(text):
+    """True when the whole utterance is a phrase Whisper invents from noise."""
+    t = (text or "").strip().lower()
+    return t in _HALLUCINATIONS or " ".join(_words(t)) in _HALLUCINATION_WORDS
+
+
+def is_echo(text, heard, min_words=3, share=0.7):
+    """True when a microphone line is the meeting audio heard again.
+
+    On speakers without headphones the microphone hears the other side, and the
+    transcript shows their sentence twice -- once from the meeting audio and
+    once as "You". ``heard`` is the text the meeting audio produced in the last
+    few seconds. A mic line whose words are mostly in it is the echo, not the
+    user. Short lines ("yes", "okay") are kept: two people really do say them.
+    """
+    words = _words(text)
+    if len(words) < min_words:
+        return False
+    pool = set(_words(heard))
+    return sum(w in pool for w in words) / len(words) >= share
 
 
 def glossary_terms():
@@ -303,7 +342,7 @@ class FasterWhisperTranscriber:
 
         text = " ".join(kept).strip()
         # Filter lone hallucination phrases (e.g. a noise blip -> "You").
-        if text.lower() in _HALLUCINATIONS:
+        if is_noise_phrase(text):
             return ""
         return text
 

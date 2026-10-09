@@ -132,8 +132,20 @@ function sourceLabel() {
   return s.options[s.selectedIndex].textContent.toLowerCase();
 }
 
+/* The first-run question sits above the capture panel, which keeps the panel
+   compact; while recording that pushed "Stop & save" below the fold. Step it
+   aside for the length of the recording and bring it back afterwards,
+   unanswered, so it is neither lost nor in the way. */
+function parkFirstRun(park) {
+  const fr = $('#firstrun');
+  if (!fr) return;
+  if (park && !fr.hidden) { fr.hidden = true; fr.dataset.parked = '1'; }
+  else if (!park && fr.dataset.parked) { delete fr.dataset.parked; fr.hidden = false; }
+}
+
 function start() {
   recording = true; t0 = Date.now(); spoken = 0;
+  parkFirstRun(true);
   lines.replaceChildren();
   /* The source cannot change under a running capture, so the control says so
      by going unavailable rather than by accepting a change and ignoring it. */
@@ -144,6 +156,7 @@ function start() {
   $('#live-text').textContent = 'Live · 0 bytes out';
   meter(true);
   driver.start();
+  recordBtn.scrollIntoView({ block: 'nearest' });
 
   clock = setInterval(() => {
     const s = Math.floor((Date.now() - t0) / 1000);
@@ -155,6 +168,7 @@ function start() {
 
 function stop() {
   recording = false;
+  parkFirstRun(false);
   clearInterval(clock); meter(false);
   $$('[data-setting="CAPTURE_MODE"]').forEach(c => (c.disabled = false));
   const secs = Math.max(1, Math.floor((Date.now() - t0) / 1000));
@@ -1099,6 +1113,7 @@ function fail(message) {
   $('#gate').textContent = message;
   if (recording) {
     recording = false;
+    parkFirstRun(false);
     clearInterval(clock);
     meter(false);
     recordBtn.textContent = '● Start recording';
@@ -1738,10 +1753,16 @@ const SU_STEPS = [
             return;
           }
           status.textContent = 'Ollama is running. Pick the model that writes your notes.';
+          // Ollama lists the recommended model as "llama3.2:latest", so an exact
+          // match misses it and the first entry (often a 1B tag) wins. Prefer
+          // the recommended model under any of its names.
+          const want = SU.opts.ollama_model;
+          const best = r.models.find(m => m === want || m === want + ':latest')
+            || r.models.find(m => m === want + ':3b');
           for (const m of r.models) {
             const o = el('option', null, m);
             o.value = m;
-            if (m === SU.opts.ollama_model) o.selected = true;
+            if (m === best) o.selected = true;
             model.append(o);
           }
           SU.choice.ollama_model = model.value;
@@ -1804,6 +1825,14 @@ function suDraw() {
   $('#su-outcome').textContent = '';
 }
 
+/* aria-modal alone does not stop keyboard and screen-reader users reaching
+   "Start recording" behind the cover; inert does. */
+function suInert(on) {
+  for (const n of document.body.children) {
+    if (n.id !== 'setup' && n.tagName !== 'SCRIPT') n.inert = on;
+  }
+}
+
 async function suStart() {
   const need = await api().setup_needed();
   if (!need || !need.needed) return false;
@@ -1820,12 +1849,14 @@ async function suStart() {
   SU.choice.ollama_url = opts.ollama_url;
   SU.choice.ollama_model = opts.ollama_model;
   $('#setup').hidden = false;
+  suInert(true);
   suDraw();
   return true;
 }
 
 function suFinish() {
   $('#setup').hidden = true;
+  suInert(false);
   askWhoFor();                       // the app is visible now; ask here
   /* The answers are live in the process now, so anything the window read
    * before setup ran has to be read again rather than kept. */
@@ -1941,7 +1972,10 @@ function firstRunCard(opts) {
   act.append(save, skip);
   host.append(act);
 
-  host.hidden = false;
+  /* Asked while a recording is already running (the tray or hotkey got there
+     first): wait until it stops rather than push Stop out of view. */
+  if (recording) { host.hidden = true; host.dataset.parked = '1'; }
+  else host.hidden = false;
 }
 
 async function askWhoFor() {

@@ -212,7 +212,10 @@ def main(argv=None):
         # On this window only. Passed to webview.start() instead, pywebview
         # puts the bar on *every* window -- the call offer grew a File/View
         # menu across its top.
-        menu=_menu(api),
+        # macOS only. On Windows the native bar cannot follow the page into
+        # dark mode -- it stays a pale strip over a dark window -- and every
+        # command on it is already a button or nav item in the page.
+        menu=_menu(api) if sys.platform == "darwin" else [],
     )
     api.attach(window)
     window.events.closing += lambda: _closing(api)

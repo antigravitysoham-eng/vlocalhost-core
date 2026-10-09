@@ -4,6 +4,7 @@ Wires the mic listener -> transcriber -> summarizer together and manages the
 live transcript. Used by both the tray app (app.py) and the CLI (--no-tray).
 """
 
+import collections
 import os
 import queue
 import re
@@ -16,6 +17,7 @@ from datetime import datetime
 import config
 from audio_listener import build_listener
 from integrations import store
+import transcriber as transcriber_mod
 from transcriber import build_transcriber
 from summarizer import summarize, generate_title, to_plain_text
 
@@ -291,6 +293,8 @@ class NoteTaker:
             except Exception as e:  # noqa: BLE001 - keep listening on a bad chunk
                 print(f"[transcribe error] {e}")
                 continue
+            if text and self._echo(text, label):
+                continue
             if text:
                 ts = datetime.now().strftime("%H:%M:%S")
                 # Only name the speaker when we're capturing more than one
@@ -308,6 +312,28 @@ class NoteTaker:
                     self._transcript.append(line)
                 self._dirty = True
                 self.on_line(line)
+
+    def _echo(self, text, label):
+        """Remember what the meeting audio said; drop the mic hearing it again.
+
+        Only when both sources are captured (labels are set): a mic-only
+        recording has no meeting audio to compare with.
+        """
+        now = time.monotonic()
+        heard = getattr(self, "_heard", None)
+        if heard is None:
+            heard = self._heard = collections.deque()
+        while heard and now - heard[0][0] > 20:
+            heard.popleft()
+        if label and label == config.LABEL_THEM:
+            heard.append((now, text))
+            return False
+        if label and label == config.LABEL_ME and heard:
+            if transcriber_mod.is_echo(text, " ".join(t for _, t in heard)):
+                print(f"[echo] dropped mic line heard from the speakers: {text!r}",
+                      flush=True)
+                return True
+        return False
 
     # -- output ---------------------------------------------------------------
     def transcript_text(self):
