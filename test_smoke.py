@@ -597,6 +597,46 @@ def notes_never_invent_decisions():
     return "invented decisions dropped; real and translated ones kept"
 
 
+def ask_screen_follows_the_provider():
+    """The Ask screen works only when a provider is registered, and says so otherwise.
+
+    Found on 9 Oct 2026: the screen was hard-wired to "Indexing needs Vlocalhost
+    Pro" and stayed that way inside the Pro build. Core now asks ask_provider;
+    the free build registers nothing and keeps the honest message.
+    """
+    import ask_provider
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui-next"))
+    import api as bridge
+
+    saved = ask_provider.get()
+    try:
+        ask_provider._PROVIDER = None
+        b = bridge.Api()
+        assert b.ask_status() == {"available": False}, b.ask_status()
+        assert b.ask_query("what did we decide?") == {"available": False}
+        assert b.ask_index_next() == {"available": False}
+
+        class Fake:
+            def status(self): return {"indexed": 2, "total": 3}
+            def index_next(self): return {"done": "m3", "failed": None, "remaining": 0}
+            def ask(self, q): return {"head": "1 decision.", "source": "search_decisions",
+                                      "facts": [{"role": "Decided", "text": "x", "who": "",
+                                                 "due": "", "meeting": "M", "at": "00:00:01"}]}
+        ask_provider.register(Fake())
+        assert b.ask_status() == {"available": True, "indexed": 2, "total": 3}
+        assert b.ask_query("what did we decide?")["answer"]["facts"][0]["at"] == "00:00:01"
+        assert b.ask_index_next()["done"] == "m3"
+        try:
+            ask_provider.register(object())
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("a provider without the three methods was accepted")
+    finally:
+        ask_provider._PROVIDER = saved
+    return "free build says needs Pro; a registered provider answers"
+
+
 def settings_writes_are_attributed():
     """A setting that moves must leave a record of which code moved it."""
     import diagnostics
@@ -813,6 +853,7 @@ check("generation floor applies to notes only", notes_floor_applies_only_to_note
 check("each engine resolves its own model", each_engine_resolves_its_own_model)
 check("runaway repetition never ships", runaway_repetition_never_ships)
 check("notes never invent decisions", notes_never_invent_decisions)
+check("ask screen follows the provider", ask_screen_follows_the_provider)
 check("settings writes are attributed", settings_writes_are_attributed)
 check("notes model resolution order", notes_model_resolution_order)
 check("bundled model dir is relocatable", bundled_dir_is_relocatable)

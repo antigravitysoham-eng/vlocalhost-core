@@ -2430,7 +2430,29 @@ paintAppearance();
   const t = $('#index-t'), s = $('#index-s'), btn = $('#index-btn');
   const libEl = $('#library-rows');
 
+  /* Set once the window reports an ask provider (ask_provider.py). With none
+     -- the free build -- this stays null and the screen below is unchanged. */
+  let provider = null, indexing = false, ib = btn;
+
+  const paintProvider = (done, todo) => {
+    const n = provider.total, k = provider.indexed, left = Math.max(0, n - k);
+    ARCHIVE.total = n; ARCHIVE.indexed = k;
+    if (t) t.textContent = n ? `${k} of ${n} meeting${n === 1 ? '' : 's'} indexed` : 'Nothing recorded yet';
+    if (s) s.textContent = !n ? 'Once a meeting is recorded it will be listed here.'
+      : indexing ? `Reading meeting ${done + 1} of ${todo} with the local model — about a minute each. You can keep working.`
+      : left ? `${left} ${left === 1 ? 'has' : 'have'} no context pack yet. Indexing reads each one on this machine, about a minute each.`
+      : 'Every meeting on this machine can be searched and cited.';
+    if (ib) {
+      ib.hidden = !left && !indexing;
+      ib.disabled = indexing;
+      ib.title = '';
+      ib.textContent = indexing ? `Indexing ${done + 1} of ${todo}…` : `Index ${left} meeting${left === 1 ? '' : 's'}`;
+    }
+    $('#index-strip')?.classList.toggle('complete', !!n && !left);
+  };
+
   const paint = () => {
+    if (provider) return paintProvider(0, 0);
     const n = ARCHIVE.total;
     if (t) t.textContent = n
       ? `0 of ${n} meeting${n === 1 ? '' : 's'} indexed`
@@ -2469,6 +2491,75 @@ paintAppearance();
   if (libEl) new MutationObserver(recount).observe(libEl, { childList: true, subtree: true });
   setInterval(recount, 1500);
   recount(); paint(); drawScope();
+
+  /* -------- a provider, when the window has one ------------------------ */
+  const runIndex = async () => {
+    if (indexing || !provider) return;
+    indexing = true;
+    const todo = Math.max(0, provider.total - provider.indexed);
+    let done = 0, stop = '';
+    while (done < todo) {
+      paintProvider(done, todo);
+      const r = await api().ask_index_next();
+      if (!r || r.error) { stop = (r && r.error) || 'no answer from this machine'; break; }
+      if (r.failed) { stop = `could not read ${r.failed} — is the local model running?`; break; }
+      done++;
+      const st = await api().ask_status();
+      if (st && st.available) provider = { indexed: st.indexed, total: st.total };
+      if (!r.done || r.remaining <= 0) break;
+    }
+    indexing = false;
+    paintProvider(0, 0);
+    if (stop && s) s.textContent = 'Indexing stopped: ' + stop;
+  };
+
+  const adopt = st => {
+    provider = { indexed: st.indexed, total: st.total };
+    if (ib === btn && btn) {
+      /* The demo's fake extraction listener rides on the original button.
+         A clean copy carries none of it. */
+      ib = btn.cloneNode(true);
+      btn.replaceWith(ib);
+      ib.addEventListener('click', runIndex);
+    }
+    if (!indexing) paintProvider(0, 0);
+    drawScope();
+  };
+
+  const poll = async () => {
+    if (!api() || !api().ask_status) return;
+    try {
+      const st = await api().ask_status();
+      if (st && st.available) adopt(st);
+    } catch (e) { /* the screen keeps its last state */ }
+  };
+  setInterval(poll, 4000);
+  poll();
+
+  /* Questions go to the provider. Without one, the existing behaviour stands:
+     an honest "nothing can be searched", never a canned answer. */
+  const coreAsk = ask;
+  ask = async function (question) {
+    if (!provider) return coreAsk(question);
+    const q = (question || '').trim();
+    if (!q) return;
+    $('#q').value = q;
+    answerHost.replaceChildren();
+    const w = el('div', 'working');
+    w.append(el('span', 'spin', '⟳'), el('span', null, `Reading ${provider.indexed} context packs…`));
+    answerHost.append(w);
+    let r = null;
+    try { r = await api().ask_query(q); } catch (e) { r = { error: String(e) }; }
+    if (r && r.error) {
+      answerHost.replaceChildren();
+      const e = el('div', 'empty');
+      e.append(el('strong', null, 'That question could not be answered.'), document.createTextNode(' ' + r.error));
+      answerHost.append(e);
+      return;
+    }
+    const a = r && r.answer;
+    renderAnswer(a && a.facts && a.facts.length ? { head: a.head, facts: a.facts, fn: a.source } : null, q);
+  };
 })();
 
 

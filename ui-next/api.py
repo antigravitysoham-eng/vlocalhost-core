@@ -621,6 +621,52 @@ class Api:
         first = picked[0] if isinstance(picked, (list, tuple)) else picked
         return {"path": str(first)}
 
+    # -- asking across meetings ------------------------------------------------
+    # Answered by whatever provider is registered in ask_provider, if any. The
+    # free build has none, and the page keeps saying so; nothing here knows or
+    # asks which product supplied one.
+
+    def ask_status(self):
+        import ask_provider
+
+        p = ask_provider.get()
+        if p is None:
+            return {"available": False}
+        try:
+            s = p.status() or {}
+            return {"available": True, "indexed": int(s.get("indexed", 0)),
+                    "total": int(s.get("total", 0))}
+        except Exception as e:  # noqa: BLE001 - the screen says why, never crashes
+            return {"available": True, "indexed": 0, "total": 0, "error": str(e)}
+
+    def ask_index_next(self):
+        """Extract one more meeting. The page calls this in a loop so it can
+        show progress and stop between meetings -- each one is a local model
+        call of a minute or so."""
+        import ask_provider
+
+        p = ask_provider.get()
+        if p is None:
+            return {"available": False}
+        try:
+            return dict(p.index_next() or {}, available=True)
+        except Exception as e:  # noqa: BLE001
+            return {"available": True, "error": str(e)}
+
+    def ask_query(self, question=""):
+        import ask_provider
+
+        p = ask_provider.get()
+        if p is None:
+            return {"available": False}
+        q = str(question or "").strip()[:300]
+        if not q:
+            return {"available": True, "answer": None}
+        try:
+            return {"available": True, "answer": p.ask(q)}
+        except Exception as e:  # noqa: BLE001
+            return {"available": True, "error": str(e)}
+
     def shutdown(self):
         """Finish what is being written, then let the window go.
 
